@@ -62,6 +62,8 @@ main{max-width:1100px;margin:0 auto;padding:16px 16px 96px;}
 .chip{border:1px solid var(--border2);background:#fff;border-radius:20px;padding:6px 12px;font-size:12px;white-space:nowrap;font-weight:600;color:var(--text2);}
 .chip.on{border-color:var(--blue);background:var(--blue-light);color:var(--blue);}
 .chip b{margin-left:4px;}
+.opts{display:flex;flex-wrap:wrap;gap:6px;}
+.opts .chip{font-size:13px;padding:8px 12px;}
 .search{width:100%;border:1px solid var(--border2);border-radius:var(--r2);padding:10px 12px;font-size:15px;margin-bottom:12px;background:#fff;}
 .os{display:flex;gap:12px;align-items:center;cursor:pointer;}
 .os:hover{box-shadow:var(--sh2);}
@@ -167,7 +169,46 @@ var API='https://whatsapp-crm-production-66bf.up.railway.app';
 var C_OS='oficina_os',C_MID='oficina_midias',C_TEC='oficina_tecnicos';
 
 /* Perguntas do questionário de entrada — as mesmas do AquaPure. */
-var QUESTIONARIO='1- Quanto tempo tem o purificador?\n2- O purificador está vazando?\n3- O purificador está gelando normalmente?\n4- Quanto tempo de uso tem o refil?\n5- Modelo/marca do refil?\n6- A água utilizada é da caixa ou da rua?\n7- Já foi realizada alguma manutenção anterior no purificador?';
+var QUEST=[
+  {p:'Quanto tempo tem o purificador?',o:['Menos de 1 ano','1 a 3 anos','3 a 5 anos','Mais de 5 anos','Não sabe']},
+  {p:'O purificador está vazando?',o:['Não','Sim, pouco','Sim, muito','Às vezes']},
+  {p:'O purificador está gelando normalmente?',o:['Sim','Não gela','Gela pouco','Modelo sem refrigeração']},
+  {p:'Quanto tempo de uso tem o refil?',o:['Menos de 6 meses','6 a 12 meses','Mais de 1 ano','Não sabe']},
+  {p:'Modelo/marca do refil?',o:['Original da marca','Paralelo/compatível','Não sabe']},
+  {p:'A água utilizada é da caixa ou da rua?',o:['Caixa','Rua','Poço','Não sabe']},
+  {p:'Já foi realizada alguma manutenção anterior no purificador?',o:['Não','Sim, na Purific','Sim, em outra assistência','Não sabe']}
+];
+/* Cada pergunta vira botões de resposta + "Outro" com campo livre. A resposta
+   escolhida fica no DOM (botão .on); questLer() junta tudo na hora de salvar. */
+function questHtml(px,resp){
+  return QUEST.map(function(q,i){
+    var atual=resp&&resp[i]?resp[i].r:'';
+    var ehOutro=!!atual&&q.o.indexOf(atual)<0;
+    return'<div class="field"><label>'+(i+1)+'. '+esc(q.p)+' <span class="req">*</span></label><div class="opts" id="'+px+'-q'+i+'">'
+      +q.o.concat(['Outro']).map(function(op,j){
+        var on=(op==='Outro')?ehOutro:op===atual;
+        return'<button type="button" class="chip'+(on?' on':'')+'" data-v="'+esc(op)+'" onclick="qSel(\''+px+'\','+i+',this)">'+esc(op)+'</button>';
+      }).join('')+'</div>'
+      +'<input id="'+px+'-q'+i+'-outro" placeholder="Escreva a resposta" style="margin-top:6px;'+(ehOutro?'':'display:none')+'" value="'+esc(ehOutro?atual:'')+'"/></div>';
+  }).join('');
+}
+function qSel(px,i,btn){
+  var box=$(px+'-q'+i);
+  Array.prototype.forEach.call(box.children,function(b){b.classList.toggle('on',b===btn);});
+  var out=$(px+'-q'+i+'-outro'),outro=btn.getAttribute('data-v')==='Outro';
+  out.style.display=outro?'':'none';if(outro)out.focus();
+}
+function questLer(px){
+  var resp=[],falta=[];
+  QUEST.forEach(function(q,i){
+    var b=$(px+'-q'+i).querySelector('.on'),r='';
+    if(b)r=b.getAttribute('data-v')==='Outro'?val(px+'-q'+i+'-outro'):b.getAttribute('data-v');
+    if(!r)falta.push(i+1);
+    resp.push({p:q.p,r:r});
+  });
+  return{respostas:resp,falta:falta};
+}
+function questTexto(resp){return resp.map(function(x,i){return(i+1)+'- '+x.p+'\n   '+(x.r||'-');}).join('\n');}
 var CONDICOES=['Bom','Razoável','Ruim','Engordurado','Outro'];
 
 /* Etapas da OS, na ordem. "t" é o carimbo de horário gravado ao entrar nela. */
@@ -466,7 +507,7 @@ function novaOS(){
     +'<div class="field"><label>Acessórios que vieram junto</label><input id="nv-acess" placeholder="Ex: refil, bandeja, mangueira, fonte…"/></div>'
     +'<div class="sec">O que o cliente falou</div>'
     +'<div class="field"><label>Problema relatado <span class="req">*</span></label><textarea id="nv-prob" rows="3"></textarea></div>'
-    +'<div class="field"><label>Questionário de entrada</label><textarea id="nv-quest" rows="9" style="font-size:13px;line-height:1.6;">'+esc(QUESTIONARIO)+'</textarea></div>'
+    +'<div class="sec">Questionário de entrada</div>'+questHtml('nv',null)
     +'<div class="field"><label>Atendente</label><input id="nv-atend" value="'+esc(lerLocal('atendente'))+'"/></div>'
     +'<div class="sec">Como o aparelho chegou</div>'
     +midiaFormHtml('Fotos de entrada (até 6)',false,true)
@@ -527,7 +568,7 @@ async function salvarNovaOS(){
                     :{nome:val('nv-nome'),documento:val('nv-doc'),telefone:val('nv-tel'),blingId:null};
   var os={
     cliente:cli,marca:val('nv-marca'),modelo:val('nv-modelo'),nSerie:val('nv-serie'),condicao:val('nv-cond'),
-    acessorios:val('nv-acess'),problema:val('nv-prob'),questionario:val('nv-quest'),atendente:val('nv-atend')
+    acessorios:val('nv-acess'),problema:val('nv-prob'),atendente:val('nv-atend')
   };
   var falta=[];
   if(!cli.nome)falta.push('nome do cliente');
@@ -535,6 +576,8 @@ async function salvarNovaOS(){
   if(!os.marca)falta.push('marca');
   if(!os.modelo)falta.push('modelo');
   if(!os.problema)falta.push('problema relatado');
+  var qz=questLer('nv');os.respostas=qz.respostas;os.questionario=questTexto(qz.respostas);
+  if(qz.falta.length)falta.push('questionário (pergunta'+(qz.falta.length>1?'s ':' ')+qz.falta.join(', ')+')');
   if(!F.fotos.length)falta.push('pelo menos 1 foto de entrada');
   if(NV.manual&&!val('nv-numero'))falta.push('nº da OS');
   if(falta.length){nvErro('Falta preencher: '+falta.join(', ')+'.');return;}
@@ -809,10 +852,14 @@ function editarRecepcao(id){
     +'<div class="field"><label>Condição</label><select id="ed-cond"><option value="">-</option>'+cond+'</select></div></div>'
     +'<div class="field"><label>Acessórios</label><input id="ed-acess" value="'+esc(o.acessorios||'')+'"/></div>'
     +'<div class="field"><label>Problema relatado</label><textarea id="ed-prob" rows="3">'+esc(o.problema||'')+'</textarea></div>'
-    +'<div class="field"><label>Questionário</label><textarea id="ed-quest" rows="8" style="font-size:13px;">'+esc(o.questionario||'')+'</textarea></div>',
+    +(o.respostas?'<div class="sec">Questionário</div>'+questHtml('ed',o.respostas)
+      :'<div class="field"><label>Questionário</label><textarea id="ed-quest" rows="8" style="font-size:13px;">'+esc(o.questionario||'')+'</textarea></div>'),
     'Salvar',async function(){
-      await avancar(id,{numero:val('ed-num'),'cliente.nome':val('ed-nome'),'cliente.telefone':val('ed-tel'),marca:val('ed-marca'),modelo:val('ed-modelo'),
-        nSerie:val('ed-serie'),condicao:val('ed-cond'),acessorios:val('ed-acess'),problema:val('ed-prob'),questionario:val('ed-quest')},'Dados atualizados');
+      var qz=o.respostas?questLer('ed'):null;
+      if(qz&&qz.falta.length){psErro('Responda a pergunta '+qz.falta.join(', ')+' do questionário.');return false;}
+      var qupd=qz?{respostas:qz.respostas,questionario:questTexto(qz.respostas)}:{questionario:val('ed-quest')};
+      await avancar(id,Object.assign(qupd,{numero:val('ed-num'),'cliente.nome':val('ed-nome'),'cliente.telefone':val('ed-tel'),marca:val('ed-marca'),modelo:val('ed-modelo'),
+        nSerie:val('ed-serie'),condicao:val('ed-cond'),acessorios:val('ed-acess'),problema:val('ed-prob')}),'Dados atualizados');
     });
 }
 
