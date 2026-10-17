@@ -182,14 +182,15 @@ var QUEST=[
    escolhida fica no DOM (botão .on); questLer() junta tudo na hora de salvar. */
 function questHtml(px,resp){
   return QUEST.map(function(q,i){
-    var atual=resp&&resp[i]?resp[i].r:'';
+    var atual=resp&&resp[i]?resp[i].r:'',obs=resp&&resp[i]&&resp[i].obs||'';
     var ehOutro=!!atual&&q.o.indexOf(atual)<0;
     return'<div class="field"><label>'+(i+1)+'. '+esc(q.p)+' <span class="req">*</span></label><div class="opts" id="'+px+'-q'+i+'">'
       +q.o.concat(['Outro']).map(function(op,j){
         var on=(op==='Outro')?ehOutro:op===atual;
         return'<button type="button" class="chip'+(on?' on':'')+'" data-v="'+esc(op)+'" onclick="qSel(\''+px+'\','+i+',this)">'+esc(op)+'</button>';
       }).join('')+'</div>'
-      +'<input id="'+px+'-q'+i+'-outro" placeholder="Escreva a resposta" style="margin-top:6px;'+(ehOutro?'':'display:none')+'" value="'+esc(ehOutro?atual:'')+'"/></div>';
+      +'<input id="'+px+'-q'+i+'-outro" placeholder="Escreva a resposta" style="margin-top:6px;'+(ehOutro?'':'display:none')+'" value="'+esc(ehOutro?atual:'')+'"/>'
+      +'<input id="'+px+'-q'+i+'-obs" placeholder="Observação (opcional)" style="margin-top:6px;font-size:13px;" value="'+esc(obs)+'"/></div>';
   }).join('');
 }
 function qSel(px,i,btn){
@@ -204,11 +205,11 @@ function questLer(px){
     var b=$(px+'-q'+i).querySelector('.on'),r='';
     if(b)r=b.getAttribute('data-v')==='Outro'?val(px+'-q'+i+'-outro'):b.getAttribute('data-v');
     if(!r)falta.push(i+1);
-    resp.push({p:q.p,r:r});
+    resp.push({p:q.p,r:r,obs:val(px+'-q'+i+'-obs')});
   });
   return{respostas:resp,falta:falta};
 }
-function questTexto(resp){return resp.map(function(x,i){return(i+1)+'- '+x.p+'\n   '+(x.r||'-');}).join('\n');}
+function questTexto(resp){return resp.map(function(x,i){return(i+1)+'- '+x.p+'\n   '+(x.r||'-')+(x.obs?' — '+x.obs:'');}).join('\n');}
 var CONDICOES=['Bom','Razoável','Ruim','Engordurado','Outro'];
 
 /* Etapas da OS, na ordem. "t" é o carimbo de horário gravado ao entrar nela. */
