@@ -79,6 +79,7 @@ main{max-width:1100px;margin:0 auto;padding:16px 16px 96px;}
 .b-teal{background:var(--teal-light);color:var(--teal);}
 .b-green{background:var(--green-light);color:var(--green);}
 .b-red{background:var(--red-light);color:var(--red);}
+.b-orange{background:#fdeedd;color:#b45309;}
 .b-gray{background:#eef0f3;color:var(--text2);}
 .late{color:var(--red);font-weight:700;}
 .empty{text-align:center;color:var(--text3);padding:40px 16px;}
@@ -216,7 +217,8 @@ var CONDICOES=['Bom','Razoável','Ruim','Engordurado','Outro'];
 var ETAPAS=[
   {k:'recebido',            l:'Aguardando orçamento', c:'b-blue',   t:'recebido'},
   {k:'em_orcamento',        l:'Em orçamento',         c:'b-amber',  t:'orcIni'},
-  {k:'aguardando_aprovacao',l:'Aguardando cliente',   c:'b-purple', t:'orcFim'},
+  {k:'aguardando_preco',    l:'Aguardando preço',     c:'b-orange', t:'orcFim'},
+  {k:'aguardando_aprovacao',l:'Aguardando cliente',   c:'b-purple', t:'precificado'},
   {k:'aprovado',            l:'Aprovado — na fila',   c:'b-teal',   t:'resposta'},
   {k:'em_servico',          l:'Em serviço',           c:'b-amber',  t:'servIni'},
   {k:'pronto',              l:'Pronto p/ retirada',   c:'b-green',  t:'servFim'},
@@ -229,14 +231,15 @@ var ET={};ETAPAS.forEach(function(e){ET[e.k]=e;});
 var TRECHOS=[
   {k:'esperaOrc', l:'Espera p/ orçamento', de:'recebido', ate:'orcIni'},
   {k:'orcamento', l:'Fazendo orçamento',   de:'orcIni',   ate:'orcFim'},
-  {k:'cliente',   l:'Resposta do cliente', de:'orcFim',   ate:'resposta'},
+  {k:'preco',     l:'Precificação (comercial)', de:'orcFim', ate:'precificado'},
+  {k:'cliente',   l:'Resposta do cliente', de:'precificado', ate:'resposta'},
   {k:'esperaServ',l:'Espera p/ serviço',   de:'resposta', ate:'servIni', soAprovado:true},
   {k:'execucao',  l:'Execução do serviço', de:'servIni',  ate:'servFim'},
   {k:'retirada',  l:'Aguardando retirada', de:'servFim',  ate:'entregue'},
   {k:'total',     l:'Total na loja',       de:'recebido', ate:'entregue'}
 ];
 /* Acima disso, a OS aparece como parada na etapa atual. */
-var ALERTA_H={recebido:24,em_orcamento:24,aguardando_aprovacao:48,aprovado:24,em_servico:48,pronto:72,devolver:72};
+var ALERTA_H={recebido:24,em_orcamento:24,aguardando_preco:24,aguardando_aprovacao:48,aprovado:24,em_servico:48,pronto:72,devolver:72};
 
 /* ═══ Estado ═════════════════════════════════════════════════════════════ */
 var db=null,storage=null,FB_ERR='';
@@ -448,7 +451,7 @@ function render(){
 var FILTROS=[
   {k:'abertas',l:'Abertas',f:function(o){return o.etapa!=='entregue';}},
   {k:'oficina',l:'Na oficina',f:function(o){return['recebido','em_orcamento','aprovado','em_servico'].indexOf(o.etapa)>=0;}},
-  {k:'balcao',l:'No balcão',f:function(o){return['aguardando_aprovacao','pronto','devolver'].indexOf(o.etapa)>=0;}},
+  {k:'balcao',l:'No balcão',f:function(o){return['aguardando_preco','aguardando_aprovacao','pronto','devolver'].indexOf(o.etapa)>=0;}},
   {k:'paradas',l:'Paradas',f:function(o){return o.etapa!=='entregue'&&atrasada(o);}}
 ].concat(ETAPAS.map(function(e){return{k:e.k,l:e.l,f:function(o){return o.etapa===e.k;}};}))
  .concat([{k:'todas',l:'Todas',f:function(){return true;}}]);
@@ -644,7 +647,8 @@ function detalheHtml(o,midias){
   var passos=[
     {k:'recebido',l:'Entrada na loja',quem:o.atendente},
     {k:'orcIni',l:'Orçamento iniciado',quem:o.tecnicoOrc,dur:d.esperaOrc,durL:'espera'},
-    {k:'orcFim',l:'Orçamento finalizado',quem:o.tecnicoOrc,dur:d.orcamento,durL:'orçamento'},
+    {k:'orcFim',l:'Orçamento técnico finalizado',quem:o.tecnicoOrc,dur:d.orcamento,durL:'orçamento'},
+    {k:'precificado',l:'Preço definido pelo comercial',quem:o.comercial,dur:d.preco,durL:'precificação'},
     {k:'resposta',l:o.aprovado===false?'Cliente NÃO aprovou':'Cliente aprovou',dur:d.cliente,durL:'resposta do cliente'}
   ];
   if(o.aprovado!==false)passos.push(
@@ -681,11 +685,17 @@ function detalheHtml(o,midias){
       +'<dt>Diagnóstico</dt><dd>'+esc(q.diagnostico||'-')+'</dd>'
       +(q.servicos?'<dt>Serviços</dt><dd>'+esc(q.servicos)+'</dd>':'')
       +(q.pecas?'<dt>Peças</dt><dd>'+esc(q.pecas)+'</dd>':'')
-      +'<dt>Mão de obra</dt><dd>'+money(q.maoObra)+'</dd>'
-      +'<dt>Peças</dt><dd>'+money(q.valorPecas)+'</dd>'
-      +'<dt>Total</dt><dd><b>'+money(q.total)+'</b></dd>'
+      +(o.tempos.precificado
+        ?'<dt>Comercial</dt><dd>'+esc(o.comercial||'-')+'</dd>'
+          +'<dt>Mão de obra</dt><dd>'+money(q.maoObra)+'</dd>'
+          +'<dt>Peças</dt><dd>'+money(q.valorPecas)+'</dd>'
+          +'<dt>Total</dt><dd><b>'+money(q.total)+'</b></dd>'
+        :'<dt>Preço</dt><dd><span class="badge b-orange">Aguardando o comercial</span></dd>')
       +(o.obsResposta?'<dt>Obs. do cliente</dt><dd>'+esc(o.obsResposta)+'</dd>':'')
-      +'</dl><div class="sec">Fotos do problema</div>'+(midias?galeria(midias,'problema'):'<div class="sub">Carregando…</div>')+'</div>';
+      +((q.historico||[]).length?'<dt>Alterações</dt><dd>'+q.historico.map(function(x){return fmtDH(x.em)+': '+money(x.de)+' → '+money(x.para);}).join('\n')+'</dd>'
+        :q.editadoEm?'<dt>Editado em</dt><dd>'+fmtDH(q.editadoEm)+'</dd>':'')
+      +'</dl><div class="sec">Fotos do problema</div>'+(midias?galeria(midias,'problema'):'<div class="sub">Carregando…</div>')
+      +'<div style="text-align:right;margin-top:10px;"><button class="btn btn-g btn-sm" onclick="editarOrc(\''+o.id+'\')">✏️ Editar orçamento</button></div></div>';
   }
   if(o.servico){
     h+='<div class="card"><h3>Serviço</h3><dl class="kv">'
@@ -693,7 +703,7 @@ function detalheHtml(o,midias){
       +(o.servico.obs?'<dt>O que foi feito</dt><dd>'+esc(o.servico.obs)+'</dd>':'')
       +'</dl><div class="sec">Aparelho funcionando (fotos e vídeo)</div>'+(midias?galeria(midias,'funcionando'):'<div class="sub">Carregando…</div>')+'</div>';
   }
-  h+='<div style="text-align:right;margin-top:6px;"><button class="btn btn-g btn-sm" onclick="editarRecepcao(\''+o.id+'\')">Editar dados da recepção</button></div>';
+  h+='<div style="display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap;margin-top:6px;"><button class="btn btn-p btn-sm" onclick="relatorioEntrada(\''+o.id+'\')">📄 Relatório de entrada</button><button class="btn btn-g btn-sm" onclick="editarRecepcao(\''+o.id+'\')">Editar dados da recepção</button></div>';
   return h;
 }
 function acoesHtml(o){
@@ -701,6 +711,8 @@ function acoesHtml(o){
   switch(o.etapa){
     case'recebido':b='<button class="btn btn-p btn-lg" onclick="iniciarOrc(\''+id+'\')">🔧 Iniciar orçamento</button>';break;
     case'em_orcamento':b='<button class="btn btn-p btn-lg" onclick="finalizarOrc(\''+id+'\')">📋 Finalizar orçamento</button>';break;
+    case'aguardando_preco':b='<div class="info">A oficina terminou o orçamento técnico. O comercial coloca o preço e depois passa ao cliente.</div>'
+      +'<button class="btn btn-p btn-lg" onclick="precificar(\''+id+'\')">💲 Colocar preço</button>';break;
     case'aguardando_aprovacao':b='<div class="info">Ligue para o cliente com o orçamento de <b>'+money(o.orcamento&&o.orcamento.total)+'</b> e registre a resposta.</div>'
       +'<div class="actions"><button class="btn btn-ok" onclick="respostaCliente(\''+id+'\',true)">✔ Cliente aprovou</button>'
       +'<button class="btn btn-no" onclick="respostaCliente(\''+id+'\',false)">✖ Cliente não aprovou</button></div>';break;
@@ -750,17 +762,45 @@ function iniciarOrc(id){
     await avancar(id,{etapa:'em_orcamento','tempos.orcIni':Date.now(),tecnicoOrc:tec},'Orçamento iniciado');
   });
 }
-function finalizarOrc(id){
-  var o=getOS(id),q=o.orcamento||{};
-  resetMidiaForm('problema',6,1);
-  passoSimples('Finalizar orçamento',
-    tecnicoSelect('ps-tec',o.tecnicoOrc)
+function orcFormHtml(o){
+  var q=o.orcamento||{};
+  return tecnicoSelect('ps-tec',o.tecnicoOrc)
     +'<div class="field"><label>Diagnóstico <span class="req">*</span></label><textarea id="ps-diag" rows="3">'+esc(q.diagnostico||'')+'</textarea></div>'
     +'<div class="field"><label>Serviços a realizar</label><textarea id="ps-serv" rows="2">'+esc(q.servicos||'')+'</textarea></div>'
-    +'<div class="field"><label>Peças necessárias</label><textarea id="ps-pecas" rows="2">'+esc(q.pecas||'')+'</textarea></div>'
+    +'<div class="field"><label>Peças necessárias</label><textarea id="ps-pecas" rows="3" placeholder="Uma peça por linha">'+esc(q.pecas||'')+'</textarea></div>';
+}
+/* Parte do comercial: o preço vem depois do orçamento técnico. */
+function precoFormHtml(o){
+  var q=o.orcamento||{};
+  return'<div class="field"><label>Responsável comercial <span class="req">*</span></label><input id="ps-com" value="'+esc(o.comercial||lerLocal('comercial'))+'"/></div>'
     +'<div class="g3"><div class="field"><label>Mão de obra R$</label><input id="ps-mo" inputmode="decimal" value="'+(q.maoObra||'')+'" oninput="somaOrc()"/></div>'
     +'<div class="field"><label>Peças R$</label><input id="ps-pc" inputmode="decimal" value="'+(q.valorPecas||'')+'" oninput="somaOrc()"/></div>'
-    +'<div class="field"><label>Total</label><input id="ps-tot" disabled value="'+money(q.total)+'"/></div></div>'
+    +'<div class="field"><label>Total</label><input id="ps-tot" disabled value="'+money(q.total)+'"/></div></div>';
+}
+function resumoTecnico(o){
+  var q=o.orcamento||{};
+  return'<div class="card" style="background:var(--surface2);box-shadow:none;"><dl class="kv">'
+    +'<dt>Técnico</dt><dd>'+esc(o.tecnicoOrc||'-')+'</dd>'
+    +'<dt>Diagnóstico</dt><dd>'+esc(q.diagnostico||'-')+'</dd>'
+    +(q.servicos?'<dt>Serviços</dt><dd>'+esc(q.servicos)+'</dd>':'')
+    +'<dt>Peças</dt><dd>'+esc(q.pecas||'Nenhuma')+'</dd></dl></div>';
+}
+function precificar(id){
+  var o=getOS(id);
+  passoSimples('Colocar preço',resumoTecnico(o)+precoFormHtml(o),'Salvar e passar ao cliente',async function(){
+    var com=val('ps-com'),mo=num(val('ps-mo')),pc=num(val('ps-pc'));
+    if(!com){psErro('Informe o responsável comercial.');return false;}
+    if(mo+pc<=0&&!confirm('O total está R$ 0,00. Salvar mesmo assim?'))return false;
+    gravarLocal('comercial',com);
+    await avancar(id,{etapa:'aguardando_aprovacao','tempos.precificado':Date.now(),comercial:com,
+      'orcamento.maoObra':mo,'orcamento.valorPecas':pc,'orcamento.total':mo+pc},'Preço salvo — passe ao cliente');
+  });
+}
+function finalizarOrc(id){
+  var o=getOS(id);
+  resetMidiaForm('problema',6,1);
+  passoSimples('Finalizar orçamento',
+    orcFormHtml(o)
     +midiaFormHtml('Fotos mostrando o problema',true,true),
     'Finalizar orçamento',async function(){
       var tec=val('ps-tec'),diag=val('ps-diag');
@@ -768,14 +808,52 @@ function finalizarOrc(id){
       if(!diag){psErro('Escreva o diagnóstico.');return false;}
       if(!F.fotos.length){psErro('Tire pelo menos 1 foto mostrando o problema.');return false;}
       if(F.enviandoVideo){psErro('Espere o vídeo terminar de enviar.');return false;}
-      var mo=num(val('ps-mo')),pc=num(val('ps-pc'));
       $('ps-ok').textContent='Salvando fotos…';
       try{await salvarMidias(id,'problema',F.fotos,F.videos);}
       catch(e){psErro('Erro ao salvar as fotos: '+e.message);$('ps-ok').textContent='Finalizar orçamento';throw e;}
       var nm=(o.midias||{});nm.problema=(nm.problema||0)+F.fotos.length+F.videos.length;
       F.fotos=[];F.videos=[];
-      await avancar(id,{etapa:'aguardando_aprovacao','tempos.orcFim':Date.now(),tecnicoOrc:tec,midias:nm,
-        orcamento:{diagnostico:diag,servicos:val('ps-serv'),pecas:val('ps-pecas'),maoObra:mo,valorPecas:pc,total:mo+pc}},'Orçamento finalizado');
+      await avancar(id,{etapa:'aguardando_preco','tempos.orcFim':Date.now(),tecnicoOrc:tec,midias:nm,
+        orcamento:{diagnostico:diag,servicos:val('ps-serv'),pecas:val('ps-pecas')}},'Orçamento técnico finalizado — vai para o comercial');
+    });
+  renderMidiaForm();
+}
+/* Corrige o orçamento sem mexer na etapa nem nos horários medidos. Cada
+   alteração guarda o valor anterior, para ficar claro se o preço mudou depois
+   que o cliente já tinha respondido. */
+function editarOrc(id){
+  var o=getOS(id);
+  resetMidiaForm('problema',6,1);
+  var aviso=o.aprovado===true?'<div class="info">O cliente já aprovou este orçamento. Se o valor mudar, confirme com ele de novo.</div>'
+    :o.aprovado===false?'<div class="info">O cliente não aprovou este orçamento.</div>':'';
+  passoSimples('Editar orçamento',
+    aviso+orcFormHtml(o)
+    +(o.tempos.precificado?'<div class="sec">Preço (comercial)</div>'+precoFormHtml(o):'')
+    +midiaFormHtml('Adicionar fotos do problema (opcional)',true,false),
+    'Salvar alterações',async function(){
+      var tec=val('ps-tec'),diag=val('ps-diag');
+      if(!tec){psErro('Escolha o técnico.');return false;}
+      if(!diag){psErro('Escreva o diagnóstico.');return false;}
+      if(F.enviandoVideo){psErro('Espere o vídeo terminar de enviar.');return false;}
+      var ant=o.orcamento||{},comPreco=!!o.tempos.precificado;
+      var mo=comPreco?num(val('ps-mo')):ant.maoObra,pc=comPreco?num(val('ps-pc')):ant.valorPecas;
+      if(comPreco&&!val('ps-com')){psErro('Informe o responsável comercial.');return false;}
+      var novas=F.fotos.length+F.videos.length,upd={tecnicoOrc:tec};
+      if(comPreco){upd.comercial=val('ps-com');gravarLocal('comercial',upd.comercial);}
+      if(novas){
+        $('ps-ok').textContent='Salvando fotos…';
+        try{await salvarMidias(id,'problema',F.fotos,F.videos);}
+        catch(e){psErro('Erro ao salvar as fotos: '+e.message);$('ps-ok').textContent='Salvar alterações';throw e;}
+        var nm=(o.midias||{});nm.problema=(nm.problema||0)+novas;upd.midias=nm;
+        F.fotos=[];F.videos=[];
+      }
+      var hist=(ant.historico||[]).slice();
+      upd.orcamento={diagnostico:diag,servicos:val('ps-serv'),pecas:val('ps-pecas'),historico:hist,editadoEm:Date.now()};
+      if(comPreco){
+        if((ant.total||0)!==mo+pc)hist.push({em:Date.now(),de:ant.total||0,para:mo+pc});
+        upd.orcamento.maoObra=mo;upd.orcamento.valorPecas=pc;upd.orcamento.total=mo+pc;
+      }
+      await avancar(id,upd,'Orçamento atualizado');
     });
   renderMidiaForm();
 }
@@ -823,8 +901,8 @@ function entregar(id){
     await avancar(id,{etapa:'entregue','tempos.entregue':Date.now()},'OS encerrada');
   });
 }
-var NOMES_T={recebido:'Entrada na loja',orcIni:'Início do orçamento',orcFim:'Fim do orçamento',resposta:'Resposta do cliente',servIni:'Início do serviço',servFim:'Fim do serviço',entregue:'Entrega'};
-var ORDEM_T=['recebido','orcIni','orcFim','resposta','servIni','servFim','entregue'];
+var NOMES_T={recebido:'Entrada na loja',orcIni:'Início do orçamento',orcFim:'Fim do orçamento',precificado:'Preço do comercial',resposta:'Resposta do cliente',servIni:'Início do serviço',servFim:'Fim do serviço',entregue:'Entrega'};
+var ORDEM_T=['recebido','orcIni','orcFim','precificado','resposta','servIni','servFim','entregue'];
 function ajustarHora(id,k){
   var o=getOS(id);
   passoSimples('Ajustar horário','<div class="field"><label>'+esc(NOMES_T[k])+'</label><input type="datetime-local" id="ps-dh" value="'+toLocalInput(o.tempos[k])+'"/></div>'
@@ -862,6 +940,262 @@ function editarRecepcao(id){
       await avancar(id,Object.assign(qupd,{numero:val('ed-num'),'cliente.nome':val('ed-nome'),'cliente.telefone':val('ed-tel'),marca:val('ed-marca'),modelo:val('ed-modelo'),
         nSerie:val('ed-serie'),condicao:val('ed-cond'),acessorios:val('ed-acess'),problema:val('ed-prob')}),'Dados atualizados');
     });
+}
+
+/* ═══ Identidade Purific para PDF (copiado do AquaPure) ════════════════ */
+var PURIFIC={
+  nome:'Purific Sorocaba',
+  cnpj:'20.608.240/0001-80',
+  endereco:'Rua Professor Toledo, 730 - Sorocaba/SP',
+  tel:'(15) 3342-5603',
+  whats:'(15) 98136-0029',
+  azul:[12,133,170],
+  verde:[11,163,155]
+};
+var LOGO_RATIO=0.287;
+var LOGO_PURIFIC='data:image/png;base64,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';
+
+var MESES_EXT=['janeiro','fevereiro','março','abril','maio','junho','julho','agosto','setembro','outubro','novembro','dezembro'];
+function dataExtenso(d){
+  d=d||new Date();
+  return d.getDate()+' de '+MESES_EXT[d.getMonth()]+' de '+d.getFullYear();
+}
+
+/* Marca d'agua: logo central, bem suave, por cima do conteudo. */
+function pdfMarcaDagua(doc){
+  try{
+    var w=132,h=w*LOGO_RATIO;
+    doc.saveGraphicsState();
+    doc.setGState(new doc.GState({opacity:0.07}));
+    doc.addImage(LOGO_PURIFIC,'PNG',(210-w)/2,(297-h)/2,w,h);
+    doc.restoreGraphicsState();
+  }catch(e){}
+}
+
+/* Nova pagina ja com marca d'agua e cabecalho reduzido. Devolve o Y inicial. */
+var PDF_TOPY=27;
+function pdfNovaPagina(doc){
+  doc.addPage();
+  try{doc.addImage(LOGO_PURIFIC,'PNG',14,9,34,34*LOGO_RATIO);}catch(e){}
+  var a=PURIFIC.azul;
+  doc.setDrawColor(a[0],a[1],a[2]);doc.setLineWidth(0.4);doc.line(14,21,196,21);
+  doc.setTextColor(30,30,30);doc.setFont('helvetica','normal');
+  return PDF_TOPY;
+}
+
+/* Cabecalho da primeira pagina. Devolve o Y livre abaixo dele. */
+function pdfCabecalho(doc,titulo,subtitulo,infos){
+  var ML=14,MR=196,a=PURIFIC.azul,v=PURIFIC.verde;
+  try{doc.addImage(LOGO_PURIFIC,'PNG',ML,10,48,48*LOGO_RATIO);}catch(e){}
+  doc.setFont('helvetica','bold');doc.setFontSize(12.5);
+  doc.setTextColor(a[0],a[1],a[2]);
+  doc.text(titulo,MR,16,{align:'right'});
+  doc.setFont('helvetica','normal');doc.setFontSize(7.5);
+  doc.setTextColor(120,120,120);
+  doc.text(subtitulo,MR,21,{align:'right'});
+  doc.setTextColor(130,130,130);doc.setFontSize(7);
+  doc.text(PURIFIC.nome+'  ·  CNPJ '+PURIFIC.cnpj,MR,25.5,{align:'right'});
+  /* filete azul com realce verde, ecoando o logo */
+  doc.setDrawColor(a[0],a[1],a[2]);doc.setLineWidth(0.6);doc.line(ML,29,MR,29);
+  doc.setDrawColor(v[0],v[1],v[2]);doc.setLineWidth(0.6);doc.line(ML,29,ML+38,29);
+  /* faixa de identificacao */
+  doc.setFillColor(240,247,250);doc.roundedRect(ML,33,MR-ML,13,1.5,1.5,'F');
+  var colW=(MR-ML)/infos.length;
+  for(var i=0;i<infos.length;i++){
+    var x=ML+4+i*colW;
+    doc.setFont('helvetica','bold');doc.setFontSize(6);doc.setTextColor(a[0],a[1],a[2]);
+    doc.text(infos[i][0].toUpperCase(),x,38);
+    doc.setFont('helvetica','normal');doc.setFontSize(8);doc.setTextColor(40,40,40);
+    doc.text(doc.splitTextToSize(String(infos[i][1]||'-'),colW-6)[0],x,43);
+  }
+  doc.setTextColor(30,30,30);
+  return 50;
+}
+
+/* Campo de assinatura da empresa. */
+function pdfAssinatura(doc,y){
+  var ML=14,MR=196,a=PURIFIC.azul;
+  if(y+44>272){y=pdfNovaPagina(doc);}
+  y+=6;
+  doc.setDrawColor(215,222,226);doc.setLineWidth(0.3);
+  doc.roundedRect(ML,y,MR-ML,38,2,2,'S');
+  doc.setFont('helvetica','normal');doc.setFontSize(7.5);doc.setTextColor(110,110,110);
+  doc.text('Sorocaba/SP, '+dataExtenso(new Date()),ML+6,y+8);
+  var cx=(ML+MR)/2;
+  doc.setDrawColor(70,70,70);doc.setLineWidth(0.35);
+  doc.line(cx-42,y+22,cx+42,y+22);
+  doc.setFont('helvetica','bold');doc.setFontSize(9);doc.setTextColor(a[0],a[1],a[2]);
+  doc.text(PURIFIC.nome,cx,y+27,{align:'center'});
+  doc.setFont('helvetica','normal');doc.setFontSize(7);doc.setTextColor(90,90,90);
+  doc.text('CNPJ: '+PURIFIC.cnpj,cx,y+31,{align:'center'});
+  doc.setFontSize(6.5);doc.setTextColor(140,140,140);
+  doc.text('Responsável Técnico',cx,y+35,{align:'center'});
+  doc.setTextColor(30,30,30);
+  return y+38;
+}
+
+/* Rodape institucional em todas as paginas. */
+function pdfRodape(doc,nowStr){
+  var ML=14,MR=196,PW=210,a=PURIFIC.azul;
+  var pc=doc.getNumberOfPages();
+  for(var i=1;i<=pc;i++){
+    doc.setPage(i);
+    pdfMarcaDagua(doc);
+    doc.setDrawColor(a[0],a[1],a[2]);doc.setLineWidth(0.4);doc.line(ML,280,MR,280);
+    doc.setFont('helvetica','bold');doc.setFontSize(7);
+    doc.setTextColor(a[0],a[1],a[2]);
+    doc.text(PURIFIC.nome+'  ·  CNPJ '+PURIFIC.cnpj,PW/2,284.5,{align:'center'});
+    doc.setFont('helvetica','normal');doc.setFontSize(6.5);
+    doc.setTextColor(110,110,110);
+    doc.text(PURIFIC.endereco+'  ·  Tel. '+PURIFIC.tel+'  ·  WhatsApp '+PURIFIC.whats,PW/2,288.5,{align:'center'});
+    doc.setTextColor(165,165,165);doc.setFontSize(6);
+    doc.text('Página '+i+' de '+pc+'  ·  Emitido em '+nowStr,PW/2,292.5,{align:'center'});
+  }
+}
+
+
+/* ═══ Relatório de entrada (PDF para o cliente) ══════════════════════════
+   Identidade visual copiada do AquaPure (cabeçalho, marca d'água, rodapé).
+   O jsPDF só é baixado na primeira vez que alguém gera um relatório, para o
+   app abrir leve no celular. */
+var JSPDF_URL='https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js';
+var _jspdfP=null;
+function carregarJsPDF(){
+  if(window.jspdf)return Promise.resolve();
+  if(_jspdfP)return _jspdfP;
+  _jspdfP=new Promise(function(ok,fail){
+    var sc=document.createElement('script');sc.src=JSPDF_URL;
+    sc.onload=function(){ok();};
+    sc.onerror=function(){_jspdfP=null;fail(new Error('Não foi possível carregar o gerador de PDF. Verifique a internet.'));};
+    document.head.appendChild(sc);
+  });
+  return _jspdfP;
+}
+/* Fotos no Storage vêm como link; o PDF precisa dos bytes. */
+function fotoDataUrl(m){
+  if(m.data)return Promise.resolve(m.data);
+  return fetch(m.url).then(function(r){return r.blob();}).then(function(b){
+    return new Promise(function(ok){var fr=new FileReader();fr.onload=function(){ok(fr.result);};fr.readAsDataURL(b);});
+  }).catch(function(){return null;});
+}
+function tamanhoImg(du){
+  return new Promise(function(ok){var im=new Image();im.onload=function(){ok({w:im.width,h:im.height});};im.onerror=function(){ok(null);};im.src=du;});
+}
+var _rel=null;
+async function relatorioEntrada(id){
+  var o=getOS(id);if(!o)return;
+  toast('Gerando relatório…');
+  try{
+    await carregarJsPDF();
+    var midias=(S.abertaId===id&&S.midias)?S.midias:await carregarMidias(id);
+    var fotos=[];
+    var ent=midias.filter(function(m){return m.grupo==='entrada'&&m.tipo==='foto';});
+    for(var i=0;i<ent.length;i++){var du=await fotoDataUrl(ent[i]);if(du)fotos.push({du:du,sz:await tamanhoImg(du)});}
+    var doc=montarPdfEntrada(o,fotos);
+    var nome='Entrada-OS-'+(o.numero||o.id)+'.pdf';
+    _rel={blob:doc.output('blob'),nome:nome,o:o};
+  }catch(e){alert('Erro ao gerar o relatório: '+e.message);return;}
+  var podeCompartilhar=false;
+  try{podeCompartilhar=!!(navigator.canShare&&navigator.canShare({files:[new File([_rel.blob],_rel.nome,{type:'application/pdf'})]}));}catch(e){}
+  modal('Relatório de entrada',
+    '<div class="info">Relatório da '+esc(osLabel(o))+' pronto.'+(podeCompartilhar?' Toque em "Enviar" e escolha o WhatsApp do cliente.':' Baixe o PDF e envie pelo WhatsApp Web.')+'</div>'
+    +'<div class="actions">'
+    +(podeCompartilhar?'<button class="btn btn-ok" onclick="compartilharRel()">📤 Enviar (WhatsApp…)</button>':'')
+    +'<button class="btn btn-g" onclick="baixarRel()">⬇ Baixar PDF</button>'
+    +'<button class="btn btn-g" onclick="abrirRel()">👁 Ver</button></div>'
+    +'<div class="actions"><button class="btn btn-g" onclick="voltarDetalhe()">Voltar à OS</button></div>');
+  S.modo='passo';
+}
+function compartilharRel(){
+  if(!_rel)return;
+  var f=new File([_rel.blob],_rel.nome,{type:'application/pdf'});
+  var c=_rel.o.cliente||{};
+  navigator.share({files:[f],title:_rel.nome,text:'Olá'+(c.nome?' '+c.nome.split(' ')[0]:'')+'! Segue o comprovante de entrada do seu purificador na Purific ('+osLabel(_rel.o)+').'})
+    .catch(function(e){if(e&&e.name!=='AbortError')alert('Não foi possível compartilhar: '+e.message);});
+}
+function baixarRel(){
+  if(!_rel)return;
+  var a=document.createElement('a');a.href=URL.createObjectURL(_rel.blob);a.download=_rel.nome;
+  document.body.appendChild(a);a.click();a.remove();setTimeout(function(){URL.revokeObjectURL(a.href);},5000);
+}
+function abrirRel(){if(_rel)window.open(URL.createObjectURL(_rel.blob),'_blank');}
+function montarPdfEntrada(o,fotos){
+  var doc=new window.jspdf.jsPDF();
+  var ML=14,MR=196,az=PURIFIC.azul,c=o.cliente||{};
+  var y=pdfCabecalho(doc,'RELATÓRIO DE ENTRADA','Recebimento de aparelho para avaliação técnica',[
+    ['N° OS',o.numero||'-'],['Entrada',fmtDH(o.tempos&&o.tempos.recebido)],['Atendente',o.atendente||'-']
+  ]);
+  function chk(n){if(y+n>272){y=pdfNovaPagina(doc);doc.setFontSize(8.5);}}
+  /* 26mm: o título nunca fica sozinho no pé da página, longe do conteúdo. */
+  function section(t){
+    chk(26);y+=3;
+    doc.setFillColor(240,247,250);doc.rect(ML,y-4.5,MR-ML,7,'F');
+    doc.setFillColor(az[0],az[1],az[2]);doc.rect(ML,y-4.5,1.6,7,'F');
+    doc.setFont('helvetica','bold');doc.setFontSize(10);doc.setTextColor(az[0],az[1],az[2]);
+    doc.text(t,ML+4,y);doc.setTextColor(30,30,30);doc.setFontSize(8.5);y+=7;
+  }
+  function line(lbl,v){
+    if(!v)return;
+    var ls=doc.splitTextToSize(String(v),MR-ML-45);chk(ls.length*4.5+2);
+    doc.setFont('helvetica','bold');doc.text(lbl+':',ML,y);
+    doc.setFont('helvetica','normal');doc.text(ls,ML+45,y);y+=ls.length*4.5+1.5;
+  }
+  doc.setFontSize(8.5);
+  section('Cliente');
+  line('Nome',c.nome);line('Telefone',c.telefone);line('CPF/CNPJ',c.documento);
+  section('Aparelho');
+  line('Purificador',aparelho(o));line('N° de série',o.nSerie);
+  line('Condição de limpeza',o.condicao);line('Acessórios entregues',o.acessorios||'Nenhum');
+  section('Problema relatado pelo cliente');
+  var lp=doc.splitTextToSize(o.problema||'-',MR-ML-4);chk(lp.length*4.5+2);
+  doc.setFont('helvetica','normal');doc.text(lp,ML+2,y);y+=lp.length*4.5+2;
+  if(o.respostas||o.questionario){
+    section('Questionário de entrada');
+    if(o.respostas){
+      o.respostas.forEach(function(r,i){
+        var lq=doc.splitTextToSize((i+1)+'. '+r.p,MR-ML-4);
+        var lr=doc.splitTextToSize((r.r||'-')+(r.obs?' — '+r.obs:''),MR-ML-10);
+        chk((lq.length+lr.length)*4.5+2);
+        doc.setFont('helvetica','bold');doc.text(lq,ML+2,y);y+=lq.length*4.5;
+        doc.setFont('helvetica','normal');doc.text(lr,ML+8,y);y+=lr.length*4.5+1.5;
+      });
+    }else{
+      var lt=doc.splitTextToSize(o.questionario,MR-ML-4);chk(lt.length*4.5);
+      doc.setFont('helvetica','normal');doc.text(lt,ML+2,y);y+=lt.length*4.5+2;
+    }
+  }
+  if(fotos.length){
+    section('Como o aparelho chegou');
+    var W=58,H=44,G=4;
+    for(var i=0;i<fotos.length;i++){
+      var col=i%3;if(col===0){chk(H+4);if(i>0)y+=H+G;}
+      var x=ML+col*(W+G),f=fotos[i],w=W,h=H;
+      if(f.sz){var r=Math.min(W/f.sz.w,H/f.sz.h);w=f.sz.w*r;h=f.sz.h*r;}
+      try{doc.addImage(f.du,'JPEG',x+(W-w)/2,y+(H-h)/2,w,h);}catch(e){}
+      doc.setDrawColor(210,210,210);doc.setLineWidth(0.2);doc.rect(x,y,W,H);
+    }
+    y+=H+4;
+  }
+  section('Próximos passos');
+  var termo=['Seu purificador será avaliado pela nossa equipe técnica.',
+    'Antes de qualquer serviço, entraremos em contato com o orçamento para sua aprovação.',
+    'Guarde este comprovante: o número da OS identifica o seu aparelho na loja.'];
+  doc.setFont('helvetica','normal');
+  termo.forEach(function(t){var l=doc.splitTextToSize('• '+t,MR-ML-4);chk(l.length*4.5);doc.text(l,ML+2,y);y+=l.length*4.5+1;});
+  /* Assinaturas: cliente e loja */
+  if(y+40>272)y=pdfNovaPagina(doc);
+  y+=8;
+  doc.setDrawColor(215,222,226);doc.setLineWidth(0.3);doc.roundedRect(ML,y,MR-ML,32,2,2,'S');
+  doc.setFontSize(7.5);doc.setTextColor(110,110,110);doc.text('Sorocaba/SP, '+dataExtenso(new Date(o.tempos&&o.tempos.recebido||Date.now())),ML+6,y+7);
+  var cx1=ML+(MR-ML)/4,cx2=ML+3*(MR-ML)/4;
+  doc.setDrawColor(70,70,70);doc.setLineWidth(0.35);doc.line(cx1-36,y+20,cx1+36,y+20);doc.line(cx2-36,y+20,cx2+36,y+20);
+  doc.setFont('helvetica','bold');doc.setFontSize(8.5);doc.setTextColor(az[0],az[1],az[2]);
+  doc.text(c.nome||'Cliente',cx1,y+25,{align:'center'});doc.text(PURIFIC.nome,cx2,y+25,{align:'center'});
+  doc.setFont('helvetica','normal');doc.setFontSize(6.5);doc.setTextColor(140,140,140);
+  doc.text('Cliente',cx1,y+29,{align:'center'});doc.text('Atendente: '+(o.atendente||'-'),cx2,y+29,{align:'center'});
+  doc.setTextColor(30,30,30);
+  pdfRodape(doc,new Date().toLocaleDateString('pt-BR'));
+  return doc;
 }
 
 /* ═══ Medição ════════════════════════════════════════════════════════════ */
@@ -904,6 +1238,12 @@ function vPainel(){
   h+='<div class="card"><h3>Por técnico</h3>'+(nt.length?'<div class="tw"><table><thead><tr><th>Técnico</th><th>Orçamentos</th><th>Tempo médio orçamento</th><th>Serviços</th><th>Tempo médio execução</th></tr></thead><tbody>'
     +nt.map(function(n){var x=tecs[n];return'<tr><td><b>'+esc(n)+'</b></td><td>'+x.orc.length+'</td><td>'+fmtDur(media(x.orc))+'</td><td>'+x.exe.length+'</td><td>'+fmtDur(media(x.exe))+'</td></tr>';}).join('')
     +'</tbody></table></div>':'<div class="sub">Ainda sem orçamentos ou serviços finalizados no período.</div>')+'</div>';
+  var coms={};
+  per.forEach(function(o){var d=duracoes(o);if(o.comercial&&d.preco!=null)(coms[o.comercial]=coms[o.comercial]||[]).push(d.preco);});
+  var nc=Object.keys(coms).sort();
+  h+='<div class="card"><h3>Por comercial</h3>'+(nc.length?'<div class="tw"><table><thead><tr><th>Comercial</th><th>Orçamentos precificados</th><th>Tempo médio p/ colocar preço</th></tr></thead><tbody>'
+    +nc.map(function(n){return'<tr><td><b>'+esc(n)+'</b></td><td>'+coms[n].length+'</td><td>'+fmtDur(media(coms[n]))+'</td></tr>';}).join('')
+    +'</tbody></table></div>':'<div class="sub">Ainda sem orçamentos precificados no período.</div>')+'</div>';
   /* Paradas */
   h+='<div class="card"><h3>OS paradas há mais tempo que o normal</h3>'+(paradas.length?'<div class="tw"><table><thead><tr><th>OS</th><th>Cliente</th><th>Etapa</th><th>Há</th></tr></thead><tbody>'
     +paradas.map(function(o){return'<tr style="cursor:pointer" onclick="abrirOS(\''+o.id+'\')"><td><b>'+esc(o.numero||'-')+'</b></td><td>'+esc(o.cliente&&o.cliente.nome||'-')+'</td><td>'+etapaBadge(o.etapa)+'</td><td class="late">'+fmtDur(desdeEtapa(o))+'</td></tr>';}).join('')
