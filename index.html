@@ -657,9 +657,10 @@ function detalheHtml(o,midias){
     {k:'recebido',l:'Entrada na loja',quem:o.atendente},
     {k:'orcIni',l:'Orçamento iniciado',quem:o.tecnicoOrc,dur:d.esperaOrc,durL:'espera'},
     {k:'orcFim',l:'Orçamento técnico finalizado',quem:o.tecnicoOrc,dur:d.orcamento,durL:'orçamento'},
-    {k:'precificado',l:'Preço definido pelo comercial',quem:o.comercial,dur:d.preco,durL:'precificação'},
     {k:'resposta',l:o.aprovado===false?'Cliente NÃO aprovou':'Cliente aprovou',dur:d.cliente,durL:'resposta do cliente'}
   ];
+  /* OS abertas antes da etapa de preço pularam este passo. */
+  if(t.precificado||!t.resposta)passos.splice(3,0,{k:'precificado',l:'Preço definido pelo comercial',quem:o.comercial,dur:d.preco,durL:'precificação'});
   if(o.aprovado!==false)passos.push(
     {k:'servIni',l:'Serviço iniciado',quem:o.tecnico,dur:d.esperaServ,durL:'espera'},
     {k:'servFim',l:'Serviço finalizado',quem:o.tecnico,dur:d.execucao,durL:'execução'});
@@ -694,7 +695,7 @@ function detalheHtml(o,midias){
       +'<dt>Diagnóstico</dt><dd>'+esc(q.diagnostico||'-')+'</dd>'
       +(q.servicos?'<dt>Serviços</dt><dd>'+esc(q.servicos)+'</dd>':'')
       +(q.pecas?'<dt>Peças</dt><dd>'+esc(q.pecas)+'</dd>':'')
-      +(o.tempos.precificado
+      +(temPreco(o)
         ?'<dt>Comercial</dt><dd>'+esc(o.comercial||'-')+'</dd>'
           +(q.itens&&q.itens.length?'<dt>Itens</dt><dd>'+q.itens.map(function(x){return esc(x.nome)+' — '+String(x.qtd).replace('.',',')+' × '+money(x.valor)+' = '+money(x.qtd*x.valor);}).join('\n')+'</dd>':'')
           +'<dt>Serviços / mão de obra</dt><dd>'+money(q.maoObra)+'</dd>'
@@ -709,7 +710,8 @@ function detalheHtml(o,midias){
       +(q.diagEditadoEm?'<dt>Diagnóstico editado</dt><dd>'+fmtDH(q.diagEditadoEm)+'</dd>':'')
       +'</dl><div class="sec">Fotos do problema</div>'+(midias?galeria(midias,'problema'):'<div class="sub">Carregando…</div>')
       +'<div style="display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap;margin-top:10px;"><button class="btn btn-g btn-sm" onclick="editarDiag(\''+o.id+'\')">✏️ Editar diagnóstico</button>'
-      +(o.tempos.precificado?'<button class="btn btn-g btn-sm" onclick="editarOrc(\''+o.id+'\')">💲 Editar preço</button>':'')+'</div></div>';
+      +(temPreco(o)?'<button class="btn btn-g btn-sm" onclick="editarOrc(\''+o.id+'\')">💲 Editar preço</button>'
+        :o.etapa!=='aguardando_preco'?'<button class="btn btn-p btn-sm" onclick="precificar(\''+o.id+'\')">💲 Colocar preço</button>':'')+'</div></div>';
   }
   if(o.servico){
     h+='<div class="card"><h3>Serviço</h3><dl class="kv">'
@@ -887,6 +889,7 @@ async function relancarBling(id){
     await avancar(id,{'orcamento.blingLancadoEm':Date.now(),'orcamento.blingErro':''},'Itens lançados no Bling');
   }catch(e){alert('Não foi possível lançar no Bling: '+e.message);}
 }
+function temPreco(o){var q=o.orcamento||{};return!!(o.tempos.precificado||q.precificadoEm||(q.itens&&q.itens.length));}
 function resumoTecnico(o){
   var q=o.orcamento||{};
   return'<div class="card" style="background:var(--surface2);box-shadow:none;"><dl class="kv">'
@@ -899,9 +902,13 @@ function precificar(id){
   var o=getOS(id);
   passoSimples('Colocar preço',resumoTecnico(o)+precoFormHtml(o),'Salvar e passar ao cliente',async function(){
     var r=await salvarItens(o);if(!r)return false;
-    var upd={etapa:'aguardando_aprovacao','tempos.precificado':Date.now(),comercial:r.comercial};
+    /* Na etapa "Aguardando preço" o preço avança a OS e conta na medição. OS
+       que já passaram dessa fase sem preço (abertas antes desta etapa existir)
+       só recebem o preço: a etapa e os horários ficam como estão. */
+    var noFluxo=o.etapa==='aguardando_preco';
+    var upd=noFluxo?{etapa:'aguardando_aprovacao','tempos.precificado':Date.now(),comercial:r.comercial}:{comercial:r.comercial,'orcamento.precificadoEm':Date.now()};
     ['itens','valorPecas','maoObra','total','blingLancadoEm','blingErro'].forEach(function(k){upd['orcamento.'+k]=r[k];});
-    await avancar(id,upd,r.blingLancadoEm?'Itens lançados no Bling — passe ao cliente':'Preço salvo — passe ao cliente');
+    await avancar(id,upd,(r.blingLancadoEm?'Itens lançados no Bling':'Preço salvo')+(noFluxo?' — passe ao cliente':''));
   });
   renderItens();
 }
