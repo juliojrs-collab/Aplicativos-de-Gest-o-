@@ -6,9 +6,9 @@
 <meta name="theme-color" content="#0c85aa"/>
 <meta name="apple-mobile-web-app-capable" content="yes"/>
 <meta name="mobile-web-app-capable" content="yes"/>
-<meta name="apple-mobile-web-app-title" content="OS de Campo"/>
+<meta name="apple-mobile-web-app-title" content="Entregas Purific"/>
 <link rel="manifest" href="manifest.webmanifest"/>
-<title>OS de Campo · Purific</title>
+<title>Entregas · Purific</title>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
 <style>
@@ -113,13 +113,14 @@ main{max-width:760px;margin:0 auto;padding:14px 14px 96px;}
 <div class="top"><div class="top-in" id="top"></div></div>
 <main id="app"><div class="empty">Carregando…</div></main>
 <script>
-/* ═══ OS de Campo ════════════════════════════════════════════════════════
-   O técnico que atende na rua abre no celular a OS lançada no Bling, registra
-   fotos e observações, o cliente assina na tela e o PDF assinado vai para o
-   WhatsApp do cliente pelo número oficial da loja (servidor whatsapp-crm).
+/* ═══ Entregas de campo ══════════════════════════════════════════════════
+   O técnico que sai para a rua abre no celular o pedido de venda do Bling (em
+   vez de levar o pedido impresso), registra fotos e observações, o cliente
+   assina na tela e o PDF assinado vai para o WhatsApp do cliente pelo número
+   oficial da loja (servidor whatsapp-crm).
    Mesmo projeto Firebase da Oficina, em coleções próprias:
-   - campo_os       → o registro do atendimento (id = id da OS no Bling)
-   - campo_midias   → uma foto por documento, carregadas só ao abrir a OS
+   - campo_pedidos  → o registro do atendimento (id = id do pedido no Bling)
+   - campo_midias   → uma foto por documento, carregadas só ao abrir o pedido
    - campo_tecnicos → nomes dos técnicos de rua */
 var FB_CFG={
   apiKey:"AIzaSyCdRdPIM7fjV-5prMCHs_3eYqS5aARSu5I",
@@ -130,17 +131,17 @@ var FB_CFG={
   appId:"1:132328899335:web:d9e7b99354b51de0a37ba2"
 };
 var API='https://whatsapp-crm-production-66bf.up.railway.app';
-var C_OS='campo_os',C_MID='campo_midias',C_TEC='campo_tecnicos';
+var C_REG='campo_pedidos',C_MID='campo_midias',C_TEC='campo_tecnicos';
 var MAX_FOTOS=8;
-var TERMO='Declaro que o atendimento descrito nesta Ordem de Serviço foi realizado nesta data e que recebi os serviços e/ou produtos nas condições registradas acima.';
+var TERMO='Declaro que recebi nesta data os produtos e/ou serviços descritos neste pedido, nas condições registradas acima.';
 
 /* ═══ Estado ═════════════════════════════════════════════════════════════ */
 var db=null,FB_ERR='';
 var S={
   tela:'lista',tecnico:lsGet('campo_tecnico')||'',tecs:[],
-  lista:null,listaErr:'',carregando:false,filtro:'minhas',busca:'',
-  reg:{},              /* campo_os por id do Bling */
-  os:null,osErr:'',midias:[],enviando:false
+  lista:null,listaErr:'',carregando:false,filtro:lsGet('campo_filtro')||'hoje',dias:Number(lsGet('campo_dias'))||7,busca:'',
+  reg:{},              /* campo_pedidos por id do pedido no Bling */
+  ped:null,pedErr:'',midias:[],enviando:false
 };
 
 function lsGet(k){try{return localStorage.getItem(k);}catch(e){return null;}}
@@ -162,7 +163,7 @@ function listen(){
     S.tecs=snap.docs.map(function(d){return d.data().nome||'';}).filter(Boolean).sort(function(a,b){return a.localeCompare(b);});
     if(S.tela==='quem')render();
   },function(){});
-  db.collection(C_OS).orderBy('atualizadoEm','desc').limit(300).onSnapshot(function(snap){
+  db.collection(C_REG).orderBy('atualizadoEm','desc').limit(300).onSnapshot(function(snap){
     S.reg={};snap.docs.forEach(function(d){S.reg[d.id]=d.data();});
     if(S.tela==='lista')renderLista();
   },function(){});
@@ -181,7 +182,6 @@ function semAcento(s){return String(s||'').normalize('NFD').replace(/[̀-ͯ]/g,'
 function soDig(s){return String(s||'').replace(/\D/g,'');}
 function fmtFone(s){var d=soDig(s);if(d.length===11)return'('+d.slice(0,2)+') '+d.slice(2,7)+'-'+d.slice(7);if(d.length===10)return'('+d.slice(0,2)+') '+d.slice(2,6)+'-'+d.slice(6);return s||'';}
 function hojeISO(){var d=new Date();return d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate());}
-function ehMinha(o){var t=semAcento(o.tecnico),me=semAcento(S.tecnico);return!!(t&&me&&(t.indexOf(me)>=0||me.indexOf(t)>=0));}
 async function api(caminho,opts){
   var r=await fetch(API+caminho,opts);
   var j=null;try{j=await r.json();}catch(e){}
@@ -191,17 +191,17 @@ async function api(caminho,opts){
 
 /* ═══ Telas ══════════════════════════════════════════════════════════════ */
 function render(){
-  if(FB_ERR){$('top').innerHTML='<h1>📋 OS de Campo</h1>';$('app').innerHTML='<div class="err">'+esc(FB_ERR)+'</div>';return;}
+  if(FB_ERR){$('top').innerHTML='<h1>🚚 Entregas</h1>';$('app').innerHTML='<div class="err">'+esc(FB_ERR)+'</div>';return;}
   if(!S.tecnico||S.tela==='quem')return renderQuem();
-  if(S.tela==='os')return renderOS();
+  if(S.tela==='ped')return renderPedido();
   renderLista();
 }
 
 /* Primeiro acesso no aparelho: o técnico escolhe o nome dele. */
 function renderQuem(){
-  $('top').innerHTML='<h1>📋 OS de Campo</h1>';
+  $('top').innerHTML='<h1>🚚 Entregas</h1>';
   var h='<div class="card"><h3>Quem está usando este celular?</h3>'
-    +'<div class="sub" style="margin-bottom:12px;">O nome aparece na OS assinada e serve para mostrar as OS em que você é o técnico no Bling.</div>';
+    +'<div class="sub" style="margin-bottom:12px;">O seu nome sai no pedido assinado que o cliente recebe.</div>';
   if(S.tecs.length)h+='<div class="chips" style="flex-wrap:wrap;">'+S.tecs.map(function(n,i){return'<button class="chip'+(n===S.tecnico?' on':'')+'" onclick="escolherTec('+i+')">'+esc(n)+'</button>';}).join('')+'</div>';
   h+='<div class="field"><label>'+(S.tecs.length?'Não está na lista? Digite seu nome':'Seu nome')+'</label><input id="q-nome" placeholder="Ex.: Carlos" autocomplete="name"/></div>'
     +'<button class="btn btn-p btn-lg" onclick="salvarTec()">Continuar</button></div>';
@@ -215,136 +215,143 @@ function salvarTec(){
   S.tela='lista';render();if(!S.lista)carregarLista();
 }
 
-/* ═══ Lista de OS (vem do Bling) ═════════════════════════════════════════ */
+/* ═══ Lista de pedidos (vem do Bling) ═══════════════════════════════════ */
 async function carregarLista(){
   if(S.carregando)return;
   S.carregando=true;S.listaErr='';renderLista();
   try{
-    S.lista=await api('/api/bling/campo/os?dias=30');
-    lsSet('campo_lista',JSON.stringify({em:Date.now(),lista:S.lista}));
-    if(S.filtro==='minhas'&&!S.lista.some(ehMinha))S.filtro='todas';
+    S.lista=await api('/api/bling/campo/pedidos?dias='+S.dias);
+    lsSet('campo_lista',JSON.stringify({em:Date.now(),dias:S.dias,lista:S.lista}));
   }catch(e){S.listaErr=e.message;}
   S.carregando=false;
   if(S.tela==='lista')renderLista();
 }
+function ehHoje(o){var h=hojeISO();return String(o.dataPrevista||'').slice(0,10)===h||String(o.data||'').slice(0,10)===h;}
 function statusReg(id){
   var r=S.reg[String(id)];
   if(!r)return'';
-  if(r.envio&&r.envio.ok)return'<span class="badge b-green">✔ Enviada</span>';
-  if(r.assinatura)return'<span class="badge b-amber">Assinada · não enviada</span>';
+  if(r.envio&&r.envio.ok)return'<span class="badge b-green">✔ Enviado</span>';
+  if(r.assinatura)return'<span class="badge b-amber">Assinado · não enviado</span>';
   return'<span class="badge b-gray">Em atendimento</span>';
 }
 function renderLista(){
   if(!S.tecnico)return renderQuem();
-  $('top').innerHTML='<h1>📋 OS de Campo</h1><button class="who" onclick="S.tela=\'quem\';render()">👷 '+esc(S.tecnico)+'</button>';
+  $('top').innerHTML='<h1>🚚 Entregas</h1><button class="who" onclick="S.tela=\'quem\';render()">👷 '+esc(S.tecnico)+'</button>';
   var lista=S.lista||[];
-  var nMinhas=lista.filter(ehMinha).length;
-  var nAssin=Object.keys(S.reg).length;
-  var h='<input class="search" id="busca" placeholder="Buscar nº da OS, cliente ou equipamento" value="'+esc(S.busca)+'" oninput="S.busca=this.value;desenharItens()"/>'
+  /* Uma aba por situação do Bling, na ordem em que aparecem mais vezes. */
+  var cont={};lista.forEach(function(o){var k=o.situacao||'Sem situação';cont[k]=(cont[k]||0)+1;});
+  var sits=Object.keys(cont).sort(function(a,b){return cont[b]-cont[a];});
+  if(S.filtro.indexOf('sit:')===0&&!cont[S.filtro.slice(4)]&&S.lista)S.filtro='todos';
+  function chip(k,rot){return'<button class="chip'+(S.filtro===k?' on':'')+'" onclick="filtrar(\''+esc(k).replace(/'/g,"\\'")+'\')">'+rot+'</button>';}
+  var h='<input class="search" id="busca" placeholder="Buscar nº do pedido ou cliente" value="'+esc(S.busca)+'" oninput="S.busca=this.value;desenharItens()"/>'
     +'<div class="chips">'
-    +'<button class="chip'+(S.filtro==='minhas'?' on':'')+'" onclick="filtrar(\'minhas\')">Minhas ('+nMinhas+')</button>'
-    +'<button class="chip'+(S.filtro==='todas'?' on':'')+'" onclick="filtrar(\'todas\')">Todas abertas ('+lista.length+')</button>'
-    +'<button class="chip'+(S.filtro==='feitas'?' on':'')+'" onclick="filtrar(\'feitas\')">Atendidas ('+nAssin+')</button>'
+    +chip('hoje','Hoje ('+lista.filter(ehHoje).length+')')
+    +chip('todos','Todos ('+lista.length+')')
+    +chip('feitas','✍️ Assinados ('+Object.keys(S.reg).length+')')
+    +sits.map(function(k){return chip('sit:'+k,esc(k)+' ('+cont[k]+')');}).join('')
+    +'</div><div class="chips">'
+    +[3,7,15,30].map(function(d){return'<button class="chip'+(S.dias===d?' on':'')+'" onclick="mudarDias('+d+')">'+d+' dias</button>';}).join('')
     +'<button class="chip" onclick="carregarLista()">'+(S.carregando?'<span class="spin"></span>':'↻')+' Atualizar</button></div>';
-  if(S.listaErr)h+='<div class="err">Não foi possível buscar as OS no Bling: '+esc(S.listaErr)+'</div>';
-  if(S.carregando&&!S.lista)h+='<div class="info"><span class="spin"></span> Buscando as OS no Bling… a primeira busca do dia pode levar até meio minuto.</div>';
+  if(S.listaErr)h+='<div class="err">Não foi possível buscar os pedidos no Bling: '+esc(S.listaErr)+'</div>';
+  if(S.carregando&&!S.lista)h+='<div class="info"><span class="spin"></span> Buscando os pedidos no Bling…</div>';
   h+='<div id="itens"></div>';
   $('app').innerHTML=h;
   desenharItens();
 }
-function filtrar(f){S.filtro=f;renderLista();}
+function filtrar(f){S.filtro=f;lsSet('campo_filtro',f);renderLista();}
+function mudarDias(d){S.dias=d;lsSet('campo_dias',String(d));S.lista=null;carregarLista();}
 function desenharItens(){
   var el=$('itens');if(!el)return;
   var lista=(S.lista||[]).slice();
-  if(S.filtro==='minhas')lista=lista.filter(ehMinha);
+  if(S.filtro==='hoje')lista=lista.filter(ehHoje);
+  if(S.filtro.indexOf('sit:')===0){var st=S.filtro.slice(4);lista=lista.filter(function(o){return(o.situacao||'Sem situação')===st;});}
   if(S.filtro==='feitas'){
-    /* Atendidas: do registro local (inclui as que já saíram da lista do Bling). */
-    lista=Object.keys(S.reg).map(function(id){var r=S.reg[id];return{id:Number(id),numero:r.numero,cliente:r.cliente,equipamento:r.equipamento,tecnico:r.tecnico,_em:r.atualizadoEm};});
+    /* Assinados: do registro no Firebase (inclui os que já saíram do período). */
+    lista=Object.keys(S.reg).map(function(id){var r=S.reg[id];return{id:Number(id),numero:r.numero,cliente:r.cliente,total:r.total,_em:r.atualizadoEm};})
+      .sort(function(a,b){return(b._em||0)-(a._em||0);});
   }
   var q=semAcento(S.busca);
-  if(q)lista=lista.filter(function(o){return semAcento([o.numero,o.cliente,o.equipamento,o.problema].join(' ')).indexOf(q)>=0;});
+  if(q)lista=lista.filter(function(o){return semAcento([o.numero,o.cliente].join(' ')).indexOf(q)>=0;});
   if(!lista.length){
-    var msg=S.carregando?'':S.filtro==='minhas'&&S.lista
-      ?'Nenhuma OS aberta com o seu nome no campo "Técnico" do Bling.<br><button class="btn btn-g btn-sm" style="margin-top:10px;" onclick="filtrar(\'todas\')">Ver todas as abertas</button>'
-      :'Nenhuma OS encontrada.';
+    var msg=S.carregando?'':S.filtro==='hoje'&&S.lista
+      ?'Nenhum pedido com data ou previsão de hoje.<br><button class="btn btn-g btn-sm" style="margin-top:10px;" onclick="filtrar(\'todos\')">Ver todos</button>'
+      :'Nenhum pedido encontrado.';
     el.innerHTML=msg?'<div class="empty">'+msg+'</div>':'';return;
   }
-  el.innerHTML=lista.map(function(o){
-    var hoje=fmtData(o.dataPrevista)&&String(o.dataPrevista).slice(0,10)===hojeISO();
-    return'<div class="card os" onclick="abrirOS('+o.id+')">'
+  el.innerHTML=lista.slice(0,300).map(function(o){
+    var prev=fmtData(o.dataPrevista),hoje=prev&&String(o.dataPrevista).slice(0,10)===hojeISO();
+    return'<div class="card os" onclick="abrirPedido('+o.id+')">'
       +'<div class="os-num">'+esc(o.numero||'s/ nº')+'</div>'
       +'<div class="os-main"><div class="t">'+esc(o.cliente||'Cliente')+'</div>'
-      +'<div class="s">'+esc(o.equipamento||o.problema||'—')+'</div>'
+      +'<div class="s">'+(o.data?fmtData(o.data)+' · ':'')+(o.total?money(o.total):'')+'</div>'
       +'<div class="badges">'
       +(o.situacao?'<span class="badge b-blue">'+esc(o.situacao)+'</span>':'')
-      +(fmtData(o.dataPrevista)?'<span class="badge '+(hoje?'b-amber':'b-gray')+'">'+(hoje?'Hoje':'Prev. '+fmtData(o.dataPrevista))+'</span>':'')
-      +(o.tecnico&&S.filtro!=='minhas'?'<span class="badge b-gray">👷 '+esc(o.tecnico)+'</span>':'')
+      +(prev?'<span class="badge '+(hoje?'b-amber':'b-gray')+'">'+(hoje?'Entrega hoje':'Prev. '+prev)+'</span>':'')
       +(o._em?'<span class="badge b-gray">'+fmtDH(o._em)+'</span>':'')
       +statusReg(o.id)+'</div></div></div>';
   }).join('');
 }
 
-/* ═══ OS aberta ══════════════════════════════════════════════════════════ */
-function regAtual(){return S.os&&S.reg[String(S.os.id)]||{};}
-async function abrirOS(id){
-  S.tela='os';S.os={id:id,_carregando:true};S.osErr='';S.midias=[];
-  window.scrollTo(0,0);renderOS();
-  history.pushState({os:id},'');
+/* ═══ Pedido aberto ═════════════════════════════════════════════════════ */
+function regAtual(){return S.ped&&S.reg[String(S.ped.id)]||{};}
+async function abrirPedido(id){
+  S.tela='ped';S.ped={id:id,_carregando:true};S.pedErr='';S.midias=[];
+  window.scrollTo(0,0);renderPedido();
+  history.pushState({ped:id},'');
   try{
-    var o=await api('/api/bling/campo/os/'+id);
-    if(S.tela!=='os'||S.os.id!==id)return;
-    S.os=o;
+    var o=await api('/api/bling/campo/pedidos/'+id);
+    if(S.tela!=='ped'||S.ped.id!==id)return;
+    S.ped=o;
   }catch(e){
     /* Sem sinal: abre com o que ficou salvo no aparelho, se houver. */
     var r=S.reg[String(id)];
-    if(r&&r.os){S.os=r.os;S.osErr='Sem conexão com o Bling — mostrando os dados salvos no aparelho.';}
-    else{S.osErr=e.message;S.os={id:id};}
+    if(r&&r.pedido){S.ped=r.pedido;S.pedErr='Sem conexão com o Bling — mostrando os dados salvos no aparelho.';}
+    else{S.pedErr=e.message;S.ped={id:id};}
   }
   try{
-    var snap=await db.collection(C_MID).where('osId','==',String(id)).get();
+    var snap=await db.collection(C_MID).where('pedidoId','==',String(id)).get();
     S.midias=snap.docs.map(function(d){var m=d.data();m.id=d.id;return m;}).sort(function(a,b){return(a.criadoEm||0)-(b.criadoEm||0);});
   }catch(e){}
-  if(S.tela==='os'&&S.os.id===id)renderOS();
+  if(S.tela==='ped'&&S.ped.id===id)renderPedido();
 }
-function voltar(){S.tela='lista';S.os=null;render();}
-window.addEventListener('popstate',function(){if(S.tela==='os')voltar();});
+function voltar(){S.tela='lista';S.ped=null;render();}
+window.addEventListener('popstate',function(){if(S.tela==='ped')voltar();});
 
-function renderOS(){
-  var o=S.os||{},r=regAtual(),c=o.cliente||{};
-  $('top').innerHTML='<button class="back" onclick="history.back()">‹</button><h1>OS '+esc(o.numero||'')+'</h1><button class="who" onclick="S.tela=\'quem\';render()">👷 '+esc(S.tecnico)+'</button>';
-  if(o._carregando){$('app').innerHTML='<div class="empty"><span class="spin"></span> Abrindo a OS…</div>';return;}
+function renderPedido(){
+  var o=S.ped||{},r=regAtual(),c=o.cliente||{};
+  $('top').innerHTML='<button class="back" onclick="history.back()">‹</button><h1>Pedido '+esc(o.numero||'')+'</h1><button class="who" onclick="S.tela=\'quem\';render()">👷 '+esc(S.tecnico)+'</button>';
+  if(o._carregando){$('app').innerHTML='<div class="empty"><span class="spin"></span> Abrindo o pedido…</div>';return;}
   var h='';
-  if(S.osErr)h+='<div class="err">'+esc(S.osErr)+'</div>';
-  if(!o.numero&&!c.nome){$('app').innerHTML=h+'<button class="btn btn-g btn-lg" onclick="abrirOS('+o.id+')">Tentar de novo</button>';return;}
-  if(r.envio&&r.envio.ok)h+='<div class="okbox">✔ OS assinada e enviada para o WhatsApp '+esc(fmtFone(r.envio.telefone))+' em '+fmtDH(r.envio.em)+'.</div>';
+  if(S.pedErr)h+='<div class="err">'+esc(S.pedErr)+'</div>';
+  if(!o.numero&&!c.nome){$('app').innerHTML=h+'<button class="btn btn-g btn-lg" onclick="abrirPedido('+o.id+')">Tentar de novo</button>';return;}
+  if(r.envio&&r.envio.ok)h+='<div class="okbox">✔ Pedido assinado e enviado para o WhatsApp '+esc(fmtFone(r.envio.telefone))+' em '+fmtDH(r.envio.em)+'.</div>';
 
-  /* Cliente e local */
+  /* Cliente e local de entrega */
   var ende=[c.endereco,c.cidade].filter(Boolean).join(' — ');
   h+='<div class="card"><div class="sec">Cliente</div><dl class="kv">'
     +'<dt>Nome</dt><dd><b>'+esc(c.nome||'-')+'</b></dd>'
     +(c.documento?'<dt>CPF/CNPJ</dt><dd>'+esc(c.documento)+'</dd>':'')
     +(c.celular||c.telefone?'<dt>Telefone</dt><dd>'+[c.celular,c.telefone].filter(Boolean).map(function(t){return'<a href="tel:'+soDig(t)+'">'+esc(fmtFone(t))+'</a>';}).join(' · ')+'</dd>':'')
-    +(ende?'<dt>Endereço</dt><dd><a target="_blank" rel="noopener" href="https://www.google.com/maps/search/?api=1&query='+encodeURIComponent(ende)+'">'+esc(ende)+' ↗</a></dd>':'')
+    +(ende?'<dt>Entrega</dt><dd><a target="_blank" rel="noopener" href="https://www.google.com/maps/search/?api=1&query='+encodeURIComponent(ende)+'">'+esc(ende)+' ↗</a></dd>':'')
     +'</dl></div>';
 
-  /* O que fazer */
-  h+='<div class="card"><div class="sec">Serviço</div><dl class="kv">'
-    +(o.situacao?'<dt>Situação</dt><dd>'+esc(o.situacao)+'</dd>':'')
+  /* O pedido */
+  h+='<div class="card"><div class="sec">Pedido</div><dl class="kv">'
+    +(o.data?'<dt>Data</dt><dd>'+fmtData(o.data)+'</dd>':'')
     +(o.dataPrevista?'<dt>Previsão</dt><dd>'+fmtData(o.dataPrevista)+'</dd>':'')
-    +(o.tecnico?'<dt>Técnico</dt><dd>'+esc(o.tecnico)+'</dd>':'')
-    +(o.equipamento?'<dt>Equipamento</dt><dd>'+esc(o.equipamento)+(o.numeroSerie?' · Série '+esc(o.numeroSerie):'')+'</dd>':'')
-    +(o.problema?'<dt>Problema / pedido</dt><dd>'+esc(o.problema)+'</dd>':'')
+    +(o.situacao?'<dt>Situação</dt><dd>'+esc(o.situacao)+'</dd>':'')
+    +(o.vendedor?'<dt>Vendedor</dt><dd>'+esc(o.vendedor)+'</dd>':'')
     +(o.observacoes?'<dt>Observações</dt><dd>'+esc(o.observacoes)+'</dd>':'')
     +'</dl>'+itensHtml(o)+'</div>';
 
   /* Registro do atendimento */
   var assinado=!!r.assinatura,trava=assinado?' disabled':'';
   h+='<div class="card"><div class="sec">Registro do atendimento</div>'
-    +'<div class="field"><label>Fotos do serviço ('+S.midias.length+'/'+MAX_FOTOS+')</label><div class="photos">'
+    +'<div class="field"><label>Fotos ('+S.midias.length+'/'+MAX_FOTOS+')</label><div class="photos">'
     +S.midias.map(function(m){return'<div class="ph-t"><img src="'+m.data+'"/>'+(assinado?'':'<button class="x" onclick="rmFoto(\''+m.id+'\')">✕</button>')+'</div>';}).join('')
     +'</div>'+(assinado?'':'<div class="addbar"><button class="btn btn-g" onclick="addFoto(true)">📷 Tirar foto</button><button class="btn btn-g" onclick="addFoto(false)">🖼 Galeria</button></div>')
     +'<div class="sub" id="foto-st"></div></div>'
-    +'<div class="field"><label>Observações do técnico</label><textarea id="obs" rows="4" placeholder="O que foi feito, peças trocadas, pendências…"'+trava+' onchange="salvarCampos()">'+esc(r.obs||'')+'</textarea></div>'
+    +'<div class="field"><label>Observações do técnico</label><textarea id="obs" rows="4" placeholder="O que foi entregue/instalado, pendências…"'+trava+' onchange="salvarCampos()">'+esc(r.obs||'')+'</textarea></div>'
     +'<div class="g2"><div class="field"><label>Quem recebeu / assinou <span class="req">*</span></label><input id="rec-nome" value="'+esc(r.recebedor?r.recebedor.nome:(c.nome||''))+'"'+trava+' onchange="salvarCampos()"/></div>'
     +'<div class="field"><label>Documento (CPF ou RG)</label><input id="rec-doc" inputmode="numeric" value="'+esc(r.recebedor?r.recebedor.doc:'')+'"'+trava+' onchange="salvarCampos()"/></div></div>'
     +'</div>';
@@ -361,7 +368,7 @@ function renderOS(){
     if(fones.length>1)h+='<div class="field"><label>Enviar para</label><select id="fone">'+fones.map(function(t){return'<option value="'+esc(t)+'">'+esc(fmtFone(t))+'</option>';}).join('')+'</select></div>';
     else if(fones.length)h+='<input type="hidden" id="fone" value="'+esc(fones[0])+'"/>';
     else h+='<div class="err">O cliente não tem telefone no cadastro do Bling. Use "Enviar pelo celular" ou peça ao escritório para atualizar o cadastro.</div>';
-    h+=(fones.length?'<button class="btn btn-ok btn-lg" id="b-env" onclick="enviarWhats()"'+(S.enviando?' disabled':'')+'>'+(S.enviando?'<span class="spin"></span> Enviando…':(r.envio&&r.envio.ok?'Enviar de novo pelo WhatsApp':'📲 Enviar OS assinada no WhatsApp'))+'</button>':'')
+    h+=(fones.length?'<button class="btn btn-ok btn-lg" id="b-env" onclick="enviarWhats()"'+(S.enviando?' disabled':'')+'>'+(S.enviando?'<span class="spin"></span> Enviando…':(r.envio&&r.envio.ok?'Enviar de novo pelo WhatsApp':'📲 Enviar pedido assinado no WhatsApp'))+'</button>':'')
       +'<div class="actions"><button class="btn btn-g" onclick="compartilhar()">📤 Enviar pelo celular</button><button class="btn btn-g" onclick="verPdf()">👁 Ver PDF</button></div>'
       +(r.envio&&r.envio.ok?'':'<div class="actions"><button class="btn btn-g btn-sm" onclick="desfazerAssin()">Refazer assinatura</button></div>');
   }else{
@@ -372,28 +379,32 @@ function renderOS(){
   $('app').innerHTML=h;
 }
 function itensHtml(o){
-  var its=(o.servicos||[]).concat(o.pecas||[]);
+  var its=o.itens||[];
   if(!its.length)return'';
-  return'<table class="its"><thead><tr><th>Item</th><th class="n">Qtd</th><th class="n">Valor</th></tr></thead><tbody>'
-    +its.map(function(i){return'<tr><td>'+esc(i.descricao)+'</td><td class="n">'+(i.qtd||'')+'</td><td class="n">'+(i.valor?money(i.valor*(i.qtd||1)):'')+'</td></tr>';}).join('')
-    +'</tbody></table>'+(o.total?'<div style="text-align:right;font-weight:800;margin-top:8px;">Total '+money(o.total)+'</div>':'');
+  var h='<table class="its"><thead><tr><th>Item</th><th class="n">Qtd</th><th class="n">Valor</th></tr></thead><tbody>'
+    +its.map(function(i){return'<tr><td>'+esc(i.descricao)+(i.codigo?' <span class="sub">'+esc(i.codigo)+'</span>':'')+'</td><td class="n">'+(i.qtd||'')+(i.unidade?' '+esc(i.unidade):'')+'</td><td class="n">'+(i.valor?money(i.valor*(i.qtd||1)):'')+'</td></tr>';}).join('')
+    +'</tbody></table><div style="text-align:right;margin-top:8px;font-size:13px;">';
+  if(o.frete)h+='Frete '+money(o.frete)+'<br>';
+  if(o.desconto)h+='Desconto −'+money(o.desconto)+'<br>';
+  if(o.outrasDespesas)h+='Outras despesas '+money(o.outrasDespesas)+'<br>';
+  return h+(o.total?'<b style="font-size:15px;">Total '+money(o.total)+'</b>':'')+'</div>';
 }
 
-/* Grava o registro (observações, recebedor) junto com uma cópia dos dados da
-   OS — se o sinal cair depois, o PDF ainda sai do que está no aparelho. */
+/* Grava o registro (observações, recebedor) junto com uma cópia dos dados do
+   pedido — se o sinal cair depois, o PDF ainda sai do que está no aparelho. */
 function regBase(){
-  var o=S.os;
-  return{blingId:o.id,numero:o.numero||'',cliente:(o.cliente&&o.cliente.nome)||'',equipamento:o.equipamento||'',
-    tecnico:S.tecnico,os:o,atualizadoEm:Date.now()};
+  var o=S.ped;
+  return{blingId:o.id,numero:o.numero||'',cliente:(o.cliente&&o.cliente.nome)||'',total:o.total||0,
+    tecnico:S.tecnico,pedido:o,atualizadoEm:Date.now()};
 }
 function salvarCampos(extra){
   var r=regBase();
   if($('obs'))r.obs=val('obs');
   if($('rec-nome'))r.recebedor={nome:val('rec-nome'),doc:val('rec-doc')};
   if(extra)for(var k in extra)r[k]=extra[k];
-  var id=String(S.os.id);
+  var id=String(S.ped.id);
   S.reg[id]=Object.assign({},S.reg[id]||{},r);
-  return db.collection(C_OS).doc(id).set(r,{merge:true});
+  return db.collection(C_REG).doc(id).set(r,{merge:true});
 }
 
 /* ═══ Fotos ══════════════════════════════════════════════════════════════
@@ -423,20 +434,20 @@ function addFoto(camera){
   var inp=document.createElement('input');inp.type='file';inp.accept='image/*';
   if(camera)inp.capture='environment';else inp.multiple=true;
   inp.onchange=async function(e){
-    var files=Array.prototype.slice.call(e.target.files||[]),osId=String(S.os.id);
+    var files=Array.prototype.slice.call(e.target.files||[]),pedidoId=String(S.ped.id);
     var st=$('foto-st');
     for(var i=0;i<files.length&&S.midias.length<MAX_FOTOS;i++){
       if(st)st.textContent='Salvando foto…';
       try{
         var f=await compressImg(files[i]);
-        var m={osId:osId,data:f.data,w:f.w,h:f.h,criadoEm:Date.now(),tecnico:S.tecnico};
+        var m={pedidoId:pedidoId,data:f.data,w:f.w,h:f.h,criadoEm:Date.now(),tecnico:S.tecnico};
         var ref=db.collection(C_MID).doc();
         ref.set(m).catch(function(err){toast('Foto não salva: '+err.message);});
         m.id=ref.id;S.midias.push(m);
       }catch(err){toast(err.message);}
     }
-    if(!S.reg[osId])salvarCampos();
-    if(S.tela==='os'&&String(S.os.id)===osId)renderOS();
+    if(!S.reg[pedidoId])salvarCampos();
+    if(S.tela==='ped'&&String(S.ped.id)===pedidoId)renderPedido();
   };
   inp.click();
 }
@@ -444,7 +455,7 @@ function rmFoto(id){
   if(!confirm('Apagar esta foto?'))return;
   S.midias=S.midias.filter(function(m){return m.id!==id;});
   db.collection(C_MID).doc(id).delete().catch(function(){});
-  renderOS();
+  renderPedido();
 }
 
 /* ═══ Assinatura ═════════════════════════════════════════════════════════
@@ -457,7 +468,7 @@ function assinar(){
   salvarCampos();
   pegarLocal();
   var ov=document.createElement('div');ov.className='sig-full';ov.id='sig-full';
-  ov.innerHTML='<div class="sig-top"><div><b>Assinatura — '+esc(nome)+'</b><div class="sub">OS '+esc(S.os.numero||'')+' · '+esc(S.os.cliente&&S.os.cliente.nome||'')+'</div></div>'
+  ov.innerHTML='<div class="sig-top"><div><b>Assinatura — '+esc(nome)+'</b><div class="sub">Pedido '+esc(S.ped.numero||'')+' · '+esc(S.ped.cliente&&S.ped.cliente.nome||'')+'</div></div>'
     +'<button class="mdl-x" onclick="fecharAssin()">✕</button></div>'
     +'<div class="sig-termo">'+esc(TERMO)+'</div>'
     +'<div class="sig-wrap"><canvas id="sig-cv"></canvas><span class="sig-ph" id="sig-ph">Assine aqui com o dedo</span></div>'
@@ -504,7 +515,7 @@ function lerAssin(){
   return{img:c.toDataURL('image/png'),w:W,h:H,em:Date.now(),termo:TERMO};
 }
 /* GPS pedido ao abrir a tela de assinatura: até o cliente terminar, a posição
-   já chegou. Sem permissão ou sem sinal, a OS sai sem localização. */
+   já chegou. Sem permissão ou sem sinal, o pedido sai sem localização. */
 var LOCAL=null,LOCAL_P=null;
 function pegarLocal(){
   LOCAL=null;
@@ -521,16 +532,16 @@ async function confirmarAssin(){
   /* Assinatura rápida: espera até 8s pelo GPS antes de gravar. */
   if(!LOCAL&&LOCAL_P){toast('Registrando localização…');await Promise.race([LOCAL_P,new Promise(function(ok){setTimeout(ok,8000);})]);}
   await salvarCampos({assinatura:a,local:LOCAL||null}).catch(function(e){toast('Erro ao salvar: '+e.message);});
-  renderOS();
+  renderPedido();
   toast('Assinatura salva');
   if($('b-env'))enviarWhats();
 }
 function desfazerAssin(){
   if(!confirm('Apagar a assinatura e colher de novo?'))return;
-  var id=String(S.os.id);
+  var id=String(S.ped.id);
   if(S.reg[id]){delete S.reg[id].assinatura;delete S.reg[id].local;}
-  db.collection(C_OS).doc(id).update({assinatura:firebase.firestore.FieldValue.delete(),local:firebase.firestore.FieldValue.delete(),atualizadoEm:Date.now()}).catch(function(){});
-  renderOS();
+  db.collection(C_REG).doc(id).update({assinatura:firebase.firestore.FieldValue.delete(),local:firebase.firestore.FieldValue.delete(),atualizadoEm:Date.now()}).catch(function(){});
+  renderPedido();
 }
 
 /* ═══ PDF ════════════════════════════════════════════════════════════════
@@ -616,11 +627,11 @@ function pdfRodape(doc,nowStr){
 }
 async function montarPdf(){
   await carregarJsPDF();
-  var o=S.os,r=regAtual(),c=o.cliente||{},a=r.assinatura||{};
+  var o=S.ped,r=regAtual(),c=o.cliente||{},a=r.assinatura||{};
   var doc=new window.jspdf.jsPDF();
   var ML=14,MR=196,az=PURIFIC.azul;
-  var y=pdfCabecalho(doc,'ORDEM DE SERVIÇO','Atendimento externo · assinada digitalmente',[
-    ['N° OS',o.numero||'-'],['Atendimento',fmtDH(a.em||Date.now())],['Técnico',S.tecnico]
+  var y=pdfCabecalho(doc,'PEDIDO DE VENDA','Comprovante de entrega · assinado digitalmente',[
+    ['N° Pedido',o.numero||'-'],['Atendimento',fmtDH(a.em||Date.now())],['Técnico',S.tecnico]
   ]);
   function chk(n){if(y+n>272)y=pdfNovaPagina(doc);}
   function section(t){
@@ -645,29 +656,31 @@ async function montarPdf(){
   section('Cliente');
   line('Nome',c.nome);line('CPF/CNPJ',c.documento);
   line('Telefone',[c.celular,c.telefone].filter(Boolean).map(fmtFone).join(' / '));
-  line('Endereço',[c.endereco,c.cidade,c.cep?'CEP '+c.cep:''].filter(Boolean).join(' — '));
-  if(o.equipamento||o.problema){
-    section('Serviço solicitado');
-    line('Equipamento',o.equipamento);line('N° de série',o.numeroSerie);
-    line('Data da OS',fmtData(o.data));
-    if(o.problema){line('Descrição',o.problema);}
-  }
-  var its=(o.servicos||[]).map(function(i){return{t:'Serviço',i:i};}).concat((o.pecas||[]).map(function(i){return{t:'Peça',i:i};}));
+  line('Entrega',[c.endereco,c.cidade,c.cep?'CEP '+c.cep:''].filter(Boolean).join(' — '));
+  line('Data do pedido',fmtData(o.data));line('Vendedor',o.vendedor);
+  var its=o.itens||[];
   if(its.length){
-    section('Serviços e peças');
+    section('Itens do pedido');
     doc.setFont('helvetica','bold');doc.setFontSize(7.5);doc.setTextColor(110,110,110);
-    doc.text('ITEM',ML+2,y);doc.text('QTD',150,y,{align:'right'});doc.text('VALOR',MR-2,y,{align:'right'});y+=4.5;
+    doc.text('ITEM',ML+2,y);doc.text('QTD',140,y,{align:'right'});doc.text('UNIT.',165,y,{align:'right'});doc.text('TOTAL',MR-2,y,{align:'right'});y+=4.5;
     doc.setTextColor(30,30,30);doc.setFontSize(8.5);
-    its.forEach(function(x){
-      var ls=doc.splitTextToSize(x.i.descricao,120);chk(ls.length*4.5+2);
+    its.forEach(function(i){
+      var ls=doc.splitTextToSize((i.codigo?i.codigo+' - ':'')+i.descricao,110);chk(ls.length*4.5+2);
       doc.setFont('helvetica','normal');doc.text(ls,ML+2,y);
-      doc.text(String(x.i.qtd||''),150,y,{align:'right'});
-      if(x.i.valor)doc.text(money(x.i.valor*(x.i.qtd||1)),MR-2,y,{align:'right'});
+      doc.text(String(i.qtd||'')+(i.unidade?' '+i.unidade:''),140,y,{align:'right'});
+      if(i.valor){doc.text(money(i.valor),165,y,{align:'right'});doc.text(money(i.valor*(i.qtd||1)),MR-2,y,{align:'right'});}
       y+=ls.length*4.5+1;
       doc.setDrawColor(230,230,230);doc.setLineWidth(0.2);doc.line(ML,y-2.5,MR,y-2.5);
     });
+    var tot=[];
+    if(o.frete)tot.push('Frete: '+money(o.frete));
+    if(o.desconto)tot.push('Desconto: -'+money(o.desconto));
+    if(o.outrasDespesas)tot.push('Outras despesas: '+money(o.outrasDespesas));
+    doc.setFont('helvetica','normal');
+    tot.forEach(function(t){chk(5);y+=1;doc.text(t,MR-2,y,{align:'right'});y+=3.5;});
     if(o.total){chk(8);y+=2;doc.setFont('helvetica','bold');doc.text('Total: '+money(o.total),MR-2,y,{align:'right'});y+=6;}
   }
+  if(o.observacoes){section('Observações do pedido');texto(o.observacoes);}
   if(r.obs){section('Observações do técnico');texto(r.obs);}
   var fotos=S.midias.filter(function(m){return m.data;});
   if(fotos.length){
@@ -710,7 +723,7 @@ async function montarPdf(){
   pdfRodape(doc,new Date().toLocaleDateString('pt-BR'));
   return doc;
 }
-function nomePdf(){return'OS-'+(S.os.numero||S.os.id)+'-assinada.pdf';}
+function nomePdf(){return'Pedido-'+(S.ped.numero||S.ped.id)+'-assinado.pdf';}
 async function verPdf(){
   try{var doc=await montarPdf();window.open(URL.createObjectURL(doc.output('blob')),'_blank');}
   catch(e){alert('Erro ao gerar o PDF: '+e.message);}
@@ -720,7 +733,7 @@ async function compartilhar(){
   try{
     var doc=await montarPdf(),blob=doc.output('blob'),f=new File([blob],nomePdf(),{type:'application/pdf'});
     if(navigator.canShare&&navigator.canShare({files:[f]})){
-      await navigator.share({files:[f],title:nomePdf(),text:'Segue a Ordem de Serviço nº '+(S.os.numero||'')+' assinada. Purific'});
+      await navigator.share({files:[f],title:nomePdf(),text:'Segue o seu pedido nº '+(S.ped.numero||'')+' assinado. Purific'});
     }else{
       var a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=nomePdf();
       document.body.appendChild(a);a.click();a.remove();
@@ -732,21 +745,21 @@ function blobParaDataUrl(b){return new Promise(function(ok,fail){var fr=new File
 async function enviarWhats(){
   if(S.enviando)return;
   var fone=val('fone');
-  S.enviando=true;renderOS();
-  var id=String(S.os.id);
+  S.enviando=true;renderPedido();
+  var id=String(S.ped.id);
   try{
     var doc=await montarPdf();
     var pdf=await blobParaDataUrl(doc.output('blob'));
     var resp=await api('/api/bling/campo/enviar',{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({osId:S.os.id,telefone:fone,pdf:pdf,tecnico:S.tecnico})});
+      body:JSON.stringify({pedidoId:S.ped.id,telefone:fone,pdf:pdf,tecnico:S.tecnico})});
     await salvarCampos({envio:{ok:true,em:Date.now(),telefone:resp.telefone,via:resp.via,por:S.tecnico}}).catch(function(){});
-    toast('OS enviada para o WhatsApp do cliente ✔');
+    toast('Pedido enviado para o WhatsApp do cliente ✔');
   }catch(e){
     await salvarCampos({envio:{ok:false,em:Date.now(),erro:e.message,por:S.tecnico}}).catch(function(){});
     alert('Não foi possível enviar pelo número da loja:\n\n'+e.message+'\n\nUse "Enviar pelo celular" para mandar agora pelo WhatsApp do aparelho.');
   }
   S.enviando=false;
-  if(S.tela==='os'&&String(S.os.id)===id)renderOS();
+  if(S.tela==='ped'&&String(S.ped.id)===id)renderPedido();
 }
 
 /* ═══ Início ═════════════════════════════════════════════════════════════ */

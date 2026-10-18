@@ -9,12 +9,12 @@ e serviço na oficina, fotos/vídeos de cada etapa e medição do tempo de cada 
 - Número da OS gerado no Bling pelo servidor `whatsapp-crm` (Railway):
   `GET /api/bling/os/contatos` e `POST /api/bling/os`.
 
-## OS de Campo (`campo/`)
+## Entregas de campo (`campo/`)
 
-App para os técnicos de rua, publicado em `<site>/campo/`. O técnico abre no
-celular a OS lançada no Bling (lista das OS abertas, filtro "Minhas" pelo campo
-Técnico), registra fotos, observações e quem recebeu, o cliente assina na tela
-(com hora e GPS) e o PDF assinado vai para o WhatsApp do cliente pelo número
-oficial, via `whatsapp-crm`:
-`GET /api/bling/campo/os`, `GET /api/bling/campo/os/:id`, `POST /api/bling/campo/enviar`.
-Coleções no Firebase: `campo_os`, `campo_midias`, `campo_tecnicos`.
+App para os técnicos que saem para a rua, publicado em `<site>/campo/`. Em vez
+de imprimir o pedido de venda, o técnico abre no celular o pedido do Bling
+(filtros: hoje, por situação, período), registra fotos, observações e quem
+recebeu, o cliente assina na tela (com hora e GPS) e o PDF assinado vai para o
+WhatsApp do cliente pelo número oficial, via `whatsapp-crm`:
+`GET /api/bling/campo/pedidos`, `GET /api/bling/campo/pedidos/:id`, `POST /api/bling/campo/enviar`.
+Coleções no Firebase: `campo_pedidos`, `campo_midias`, `campo_tecnicos`.
