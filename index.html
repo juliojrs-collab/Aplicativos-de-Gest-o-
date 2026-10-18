@@ -79,6 +79,14 @@ main{max-width:1100px;margin:0 auto;padding:16px 16px 96px;}
 .b-teal{background:var(--teal-light);color:var(--teal);}
 .b-green{background:var(--green-light);color:var(--green);}
 .b-red{background:var(--red-light);color:var(--red);}
+.it-row{display:grid;grid-template-columns:1fr 64px 96px 32px;gap:8px;align-items:end;padding:8px 0;border-bottom:1px solid var(--border);}
+.it-row label{font-size:11px;color:var(--text2);font-weight:600;}
+.it-row input{width:100%;border:1px solid var(--border2);border-radius:6px;padding:8px;font-size:15px;}
+.it-n{min-width:0;font-size:13px;}
+.it-n b{word-break:break-word;}
+.it-x{background:none;border:none;color:var(--red);font-size:18px;padding-bottom:6px;}
+.it-total{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;background:var(--blue-light);color:var(--blue-dark);border-radius:var(--r2);padding:10px 12px;margin:12px 0;font-size:13px;}
+.it-total b{font-size:16px;}
 .b-orange{background:#fdeedd;color:#b45309;}
 .b-gray{background:#eef0f3;color:var(--text2);}
 .late{color:var(--red);font-weight:700;}
@@ -687,9 +695,12 @@ function detalheHtml(o,midias){
       +(q.pecas?'<dt>Peças</dt><dd>'+esc(q.pecas)+'</dd>':'')
       +(o.tempos.precificado
         ?'<dt>Comercial</dt><dd>'+esc(o.comercial||'-')+'</dd>'
-          +'<dt>Mão de obra</dt><dd>'+money(q.maoObra)+'</dd>'
+          +(q.itens&&q.itens.length?'<dt>Itens</dt><dd>'+q.itens.map(function(x){return esc(x.nome)+' — '+String(x.qtd).replace('.',',')+' × '+money(x.valor)+' = '+money(x.qtd*x.valor);}).join('\n')+'</dd>':'')
+          +'<dt>Serviços / mão de obra</dt><dd>'+money(q.maoObra)+'</dd>'
           +'<dt>Peças</dt><dd>'+money(q.valorPecas)+'</dd>'
           +'<dt>Total</dt><dd><b>'+money(q.total)+'</b></dd>'
+          +(o.blingId&&q.itens?'<dt>Bling</dt><dd>'+(q.blingLancadoEm?'<span class="badge b-green">Itens lançados '+fmtDH(q.blingLancadoEm)+'</span>'
+            :'<span class="badge b-red">Não lançado</span> <button class="btn btn-g btn-sm" onclick="relancarBling(\''+o.id+'\')">Lançar no Bling</button>'+(q.blingErro?'<div class="sub">'+esc(q.blingErro)+'</div>':''))+'</dd>':'')
         :'<dt>Preço</dt><dd><span class="badge b-orange">Aguardando o comercial</span></dd>')
       +(o.obsResposta?'<dt>Obs. do cliente</dt><dd>'+esc(o.obsResposta)+'</dd>':'')
       +((q.historico||[]).length?'<dt>Alterações</dt><dd>'+q.historico.map(function(x){return fmtDH(x.em)+': '+money(x.de)+' → '+money(x.para);}).join('\n')+'</dd>'
@@ -769,13 +780,109 @@ function orcFormHtml(o){
     +'<div class="field"><label>Serviços a realizar</label><textarea id="ps-serv" rows="2">'+esc(q.servicos||'')+'</textarea></div>'
     +'<div class="field"><label>Peças necessárias</label><textarea id="ps-pecas" rows="3" placeholder="Uma peça por linha">'+esc(q.pecas||'')+'</textarea></div>';
 }
-/* Parte do comercial: o preço vem depois do orçamento técnico. */
+/* Parte do comercial: o preço vem depois do orçamento técnico. O comercial
+   busca peças (tipo P) e mão de obra/serviços (tipo S) no cadastro do Bling,
+   ajusta quantidade e valor, e o app lança os itens na OS do Bling. */
+var IT={P:[],S:[]};
 function precoFormHtml(o){
   var q=o.orcamento||{};
+  IT={P:[],S:[]};
+  (q.itens||[]).forEach(function(x){(IT[x.tipo]||IT.P).push({id:x.id,nome:x.nome,codigo:x.codigo,qtd:x.qtd,valor:x.valor});});
+  function bloco(t,titulo,ph){
+    return'<div class="sec">'+titulo+'</div>'
+      +'<div id="it-lista-'+t+'"></div>'
+      +'<input class="search" style="margin:6px 0 0" id="it-busca-'+t+'" placeholder="'+ph+'" oninput="buscarItem(\''+t+'\',this.value)" autocomplete="off"/>'
+      +'<div id="it-sug-'+t+'" style="margin-top:6px"></div>';
+  }
   return'<div class="field"><label>Responsável comercial <span class="req">*</span></label><input id="ps-com" value="'+esc(o.comercial||lerLocal('comercial'))+'"/></div>'
-    +'<div class="g3"><div class="field"><label>Mão de obra R$</label><input id="ps-mo" inputmode="decimal" value="'+(q.maoObra||'')+'" oninput="somaOrc()"/></div>'
-    +'<div class="field"><label>Peças R$</label><input id="ps-pc" inputmode="decimal" value="'+(q.valorPecas||'')+'" oninput="somaOrc()"/></div>'
-    +'<div class="field"><label>Total</label><input id="ps-tot" disabled value="'+money(q.total)+'"/></div></div>';
+    +(o.blingId?'':'<div class="info">Esta OS não está ligada ao Bling (o número foi digitado à mão). Os itens ficam só no app.</div>')
+    +bloco('P','Peças','Buscar peça no Bling (nome ou código)')
+    +bloco('S','Mão de obra / serviços','Buscar serviço no Bling (ex: mão de obra)')
+    +'<div class="it-total" id="it-total"></div>';
+}
+function renderItens(){
+  ['P','S'].forEach(function(t){
+    var el=$('it-lista-'+t);if(!el)return;
+    el.innerHTML=IT[t].length?IT[t].map(function(x,i){
+      return'<div class="it-row"><div class="it-n"><b>'+esc(x.nome)+'</b>'+(x.codigo?' <small>'+esc(x.codigo)+'</small>':'')+'<div class="sub" id="it-sub-'+t+i+'">'+money(x.qtd*x.valor)+'</div></div>'
+        +'<label>Qtd<input inputmode="decimal" value="'+x.qtd+'" oninput="itAlt(\''+t+'\','+i+',\'qtd\',this.value)"/></label>'
+        +'<label>Valor un.<input inputmode="decimal" value="'+String(x.valor).replace('.',',')+'" oninput="itAlt(\''+t+'\','+i+',\'valor\',this.value)"/></label>'
+        +'<button type="button" class="it-x" onclick="IT[\''+t+'\'].splice('+i+',1);renderItens()">✕</button></div>';
+    }).join(''):'<div class="sub">Nenhum item.</div>';
+  });
+  itTotal();
+}
+function itSoma(t){return IT[t].reduce(function(a,x){return a+x.qtd*x.valor;},0);}
+function itTotal(){
+  var el=$('it-total');if(!el)return;
+  el.innerHTML='<span>Peças '+money(itSoma('P'))+' · Serviços '+money(itSoma('S'))+'</span><b>Total '+money(itSoma('P')+itSoma('S'))+'</b>';
+}
+function itAlt(t,i,k,v){
+  IT[t][i][k]=num(v);
+  var sb=$('it-sub-'+t+i);if(sb)sb.textContent=money(IT[t][i].qtd*IT[t][i].valor);
+  itTotal();
+}
+var _it={};
+function buscarItem(t,q){
+  clearTimeout(_it[t]);var box=$('it-sug-'+t);q=q.trim();
+  if(q.length<2){if(box)box.innerHTML='';return;}
+  _it[t]=setTimeout(async function(){
+    var meu=_it['n'+t]=(_it['n'+t]||0)+1;
+    box.innerHTML='<div class="hint">Buscando no Bling…</div>';
+    try{
+      var r=await fetch(API+'/api/bling/os/produtos?tipo='+t+'&q='+encodeURIComponent(q));
+      var j=await r.json();if(meu!==_it['n'+t])return;
+      if(!r.ok)throw new Error(j.error||('HTTP '+r.status));
+      _it['r'+t]=j;
+      box.innerHTML=j.length?'<div class="sug" style="margin:0">'+j.map(function(p,i){
+        return'<div onclick="addItem(\''+t+'\','+i+')"><b>'+esc(p.nome)+'</b><br><small>'+esc(p.codigo||'sem código')+' · '+money(p.preco)+'</small></div>';
+      }).join('')+'</div>':'<div class="hint">Nada encontrado no Bling.</div>';
+    }catch(e){if(meu===_it['n'+t])box.innerHTML='<div class="err">Não consegui buscar no Bling: '+esc(e.message)+'</div>';}
+  },450);
+}
+function addItem(t,i){
+  var p=_it['r'+t][i];if(!p)return;
+  IT[t].push({id:p.id,nome:p.nome,codigo:p.codigo,qtd:1,valor:p.preco||0});
+  $('it-busca-'+t).value='';$('it-sug-'+t).innerHTML='';renderItens();
+}
+/* Lê os itens do formulário, lança no Bling (se a OS veio de lá) e devolve os
+   campos do orçamento a gravar. Devolve false quando o usuário desiste. */
+async function salvarItens(o){
+  var com=val('ps-com');
+  if(!com){psErro('Informe o responsável comercial.');return false;}
+  var itens=[];
+  ['P','S'].forEach(function(t){IT[t].forEach(function(x){itens.push({tipo:t,id:x.id,nome:x.nome,codigo:x.codigo||'',qtd:x.qtd,valor:Math.round(x.valor*100)/100});});});
+  if(!itens.length){psErro('Adicione pelo menos uma peça ou serviço.');return false;}
+  if(itens.some(function(x){return!(x.qtd>0);})){psErro('Quantidade precisa ser maior que zero.');return false;}
+  var pc=itSoma('P'),mo=itSoma('S'),r={comercial:com,itens:itens,valorPecas:pc,maoObra:mo,total:pc+mo,blingLancadoEm:null,blingErro:''};
+  gravarLocal('comercial',com);
+  if(o.blingId){
+    $('ps-ok').textContent='Lançando no Bling…';
+    try{
+      var resp=await fetch(API+'/api/bling/os/'+o.blingId+'/itens',{method:'PUT',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({pecas:IT.P,servicos:IT.S})});
+      var j=await resp.json().catch(function(){return{};});
+      if(!resp.ok)throw new Error(j.error||('HTTP '+resp.status));
+      r.blingLancadoEm=Date.now();
+    }catch(e){
+      r.blingErro=e.message;
+      if(!confirm('Não foi possível lançar os itens no Bling:\n'+e.message+'\n\nSalvar só no app? Depois dá para tentar de novo pelo botão "Lançar no Bling".')){
+        $('ps-ok').textContent='Tentar de novo';return false;
+      }
+    }
+  }
+  return r;
+}
+async function relancarBling(id){
+  var o=getOS(id),q=o&&o.orcamento;if(!q||!q.itens)return;
+  IT={P:[],S:[]};q.itens.forEach(function(x){IT[x.tipo].push(x);});
+  toast('Lançando no Bling…');
+  try{
+    var resp=await fetch(API+'/api/bling/os/'+o.blingId+'/itens',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({pecas:IT.P,servicos:IT.S})});
+    var j=await resp.json().catch(function(){return{};});
+    if(!resp.ok)throw new Error(j.error||('HTTP '+resp.status));
+    await avancar(id,{'orcamento.blingLancadoEm':Date.now(),'orcamento.blingErro':''},'Itens lançados no Bling');
+  }catch(e){alert('Não foi possível lançar no Bling: '+e.message);}
 }
 function resumoTecnico(o){
   var q=o.orcamento||{};
@@ -788,13 +895,12 @@ function resumoTecnico(o){
 function precificar(id){
   var o=getOS(id);
   passoSimples('Colocar preço',resumoTecnico(o)+precoFormHtml(o),'Salvar e passar ao cliente',async function(){
-    var com=val('ps-com'),mo=num(val('ps-mo')),pc=num(val('ps-pc'));
-    if(!com){psErro('Informe o responsável comercial.');return false;}
-    if(mo+pc<=0&&!confirm('O total está R$ 0,00. Salvar mesmo assim?'))return false;
-    gravarLocal('comercial',com);
-    await avancar(id,{etapa:'aguardando_aprovacao','tempos.precificado':Date.now(),comercial:com,
-      'orcamento.maoObra':mo,'orcamento.valorPecas':pc,'orcamento.total':mo+pc},'Preço salvo — passe ao cliente');
+    var r=await salvarItens(o);if(!r)return false;
+    var upd={etapa:'aguardando_aprovacao','tempos.precificado':Date.now(),comercial:r.comercial};
+    ['itens','valorPecas','maoObra','total','blingLancadoEm','blingErro'].forEach(function(k){upd['orcamento.'+k]=r[k];});
+    await avancar(id,upd,r.blingLancadoEm?'Itens lançados no Bling — passe ao cliente':'Preço salvo — passe ao cliente');
   });
+  renderItens();
 }
 function finalizarOrc(id){
   var o=getOS(id);
@@ -835,11 +941,10 @@ function editarOrc(id){
       if(!tec){psErro('Escolha o técnico.');return false;}
       if(!diag){psErro('Escreva o diagnóstico.');return false;}
       if(F.enviandoVideo){psErro('Espere o vídeo terminar de enviar.');return false;}
-      var ant=o.orcamento||{},comPreco=!!o.tempos.precificado;
-      var mo=comPreco?num(val('ps-mo')):ant.maoObra,pc=comPreco?num(val('ps-pc')):ant.valorPecas;
-      if(comPreco&&!val('ps-com')){psErro('Informe o responsável comercial.');return false;}
+      var ant=o.orcamento||{},comPreco=!!o.tempos.precificado,r=null;
+      if(comPreco){r=await salvarItens(o);if(!r)return false;}
       var novas=F.fotos.length+F.videos.length,upd={tecnicoOrc:tec};
-      if(comPreco){upd.comercial=val('ps-com');gravarLocal('comercial',upd.comercial);}
+      if(comPreco)upd.comercial=r.comercial;
       if(novas){
         $('ps-ok').textContent='Salvando fotos…';
         try{await salvarMidias(id,'problema',F.fotos,F.videos);}
@@ -850,14 +955,13 @@ function editarOrc(id){
       var hist=(ant.historico||[]).slice();
       upd.orcamento={diagnostico:diag,servicos:val('ps-serv'),pecas:val('ps-pecas'),historico:hist,editadoEm:Date.now()};
       if(comPreco){
-        if((ant.total||0)!==mo+pc)hist.push({em:Date.now(),de:ant.total||0,para:mo+pc});
-        upd.orcamento.maoObra=mo;upd.orcamento.valorPecas=pc;upd.orcamento.total=mo+pc;
+        if(Math.abs((ant.total||0)-r.total)>0.001)hist.push({em:Date.now(),de:ant.total||0,para:r.total});
+        ['itens','valorPecas','maoObra','total','blingLancadoEm','blingErro'].forEach(function(k){upd.orcamento[k]=r[k];});
       }
       await avancar(id,upd,'Orçamento atualizado');
     });
-  renderMidiaForm();
+  renderMidiaForm();if(o.tempos.precificado)renderItens();
 }
-function somaOrc(){var t=$('ps-tot');if(t)t.value=money(num(val('ps-mo'))+num(val('ps-pc')));}
 function respostaCliente(id,aprovou){
   passoSimples(aprovou?'Cliente aprovou o orçamento':'Cliente não aprovou',
     '<div class="field"><label>Observação (opcional)</label><textarea id="ps-obs" rows="2" placeholder="'+(aprovou?'Ex: pediu urgência':'Ex: achou caro, vai comprar um novo')+'"></textarea></div>',
