@@ -1005,6 +1005,7 @@ function detalheHtml(o,midias){
     +'<dt>Problema relatado</dt><dd>'+esc(o.problema||'-')+'</dd>'
     +(o.questionario?'<dt>Questionário</dt><dd>'+esc(o.questionario)+'</dd>':'')
     +'</dl><div class="sec">Fotos de entrada</div><div id="det-mid">'+(midias?galeria(midias,'entrada'):'<div class="sub">Carregando…</div>')+'</div>'
+    +(o.blingId&&o.blingEquipErro?'<div class="err">A correção do aparelho não foi para o Bling: '+esc(o.blingEquipErro)+' <button class="btn btn-g btn-sm" onclick="reenviarEquip(\''+o.id+'\')">Tentar de novo</button></div>':'')
     +'<div class="sec">Avaliação técnica</div>'
     +(avalPaga(o)?'<div><span class="badge b-green">Paga '+money(avalValor(o))+'</span> <span class="sub">'+fmtDH(o.avaliacao.em)+'</span></div>'
       :'<div style="margin-bottom:6px;"><span class="badge b-red">Não paga</span></div><button class="btn btn-g btn-sm" onclick="registrarAvaliacao(\''+o.id+'\')">💵 Registrar pagamento da avaliação ('+money(VALOR_AVALIACAO)+')</button>')
@@ -1423,6 +1424,21 @@ function ajustarHora(id,k){
       if(k==='entregue')datasBling(id,{dataSaida:isoDia(new Date(ms))});
     });
 }
+function equipBling(o){return[aparelho(o),o.cor].filter(Boolean).join(' ');}
+async function equipParaBling(id,dados){
+  var o=getOS(id);if(!o||!o.blingId)return;
+  try{
+    var r=await fetch(API+'/api/bling/os/'+o.blingId+'/equipamento',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(dados)});
+    var j=await r.json().catch(function(){return{};});
+    if(!r.ok)throw new Error(j.error||('HTTP '+r.status));
+    await db.collection(C_OS).doc(id).update({blingEquipErro:''});
+    toast('Equipamento atualizado no Bling');
+  }catch(e){
+    try{await db.collection(C_OS).doc(id).update({blingEquipErro:e.message});}catch(x){}
+    toast('Não atualizou no Bling: '+e.message);
+  }
+}
+function reenviarEquip(id){var o=getOS(id);equipParaBling(id,{equipamento:equipBling(o),numeroSerie:o.nSerie||''});}
 function editarRecepcao(id){
   var o=getOS(id),c=o.cliente||{};
   var cond=CONDICOES.map(function(x){return'<option'+(o.condicao===x?' selected':'')+'>'+esc(x)+'</option>';}).join('');
@@ -1446,6 +1462,9 @@ function editarRecepcao(id){
       var qupd=qz?{respostas:qz.respostas,questionario:questTexto(qz.respostas)}:{questionario:val('ed-quest')};
       await avancar(id,Object.assign(qupd,{numero:val('ed-num'),'cliente.nome':val('ed-nome'),'cliente.telefone':val('ed-tel'),marca:val('ed-marca'),modelo:val('ed-modelo'),cor:val('ed-cor'),
         nSerie:val('ed-serie'),condicao:val('ed-cond'),acessorios:val('ed-acess'),problema:val('ed-prob')}),'Dados atualizados');
+      /* Equipamento (marca, modelo e cor) e nº de série também na OS do Bling. */
+      var eqAntes=equipBling(o),eqDepois=[[val('ed-marca'),val('ed-modelo')].join(' ').trim()||'Purificador',val('ed-cor')].filter(Boolean).join(' ');
+      if(o.blingId&&(eqAntes!==eqDepois||(o.nSerie||'')!==val('ed-serie')))equipParaBling(id,{equipamento:eqDepois,numeroSerie:val('ed-serie')});
     });
 }
 
