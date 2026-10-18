@@ -1412,18 +1412,18 @@ function rubricaLoja(){
     var W=360,H=200,c=document.createElement('canvas');c.width=W;c.height=H;
     var x=c.getContext('2d');
     x.strokeStyle='#1e3a8a';x.lineCap='round';x.lineJoin='round';
-    /* Entrada pela esquerda, laço no topo, haste inclinada, laço embaixo
-       e o traço final saindo para a direita, como num J escrito à mão. */
-    x.lineWidth=6;
+    /* J rápido num traço só, no jeito de canhoto: inclinado para trás (skew)
+       e com a cauda longa saindo para a esquerda. */
+    x.setTransform(1,0,0.32,1,-28,0);
+    x.lineWidth=5.5;
     x.beginPath();
-    x.moveTo(60,70);
-    x.bezierCurveTo(110,30,220,14,268,26);
-    x.bezierCurveTo(300,34,288,58,256,54);
-    x.bezierCurveTo(232,50,236,30,250,28);
-    x.bezierCurveTo(250,70,228,128,192,160);
-    x.bezierCurveTo(166,182,118,184,104,162);
-    x.bezierCurveTo(92,142,126,128,166,138);
-    x.bezierCurveTo(222,150,284,140,334,112);
+    x.moveTo(260,30);
+    x.bezierCurveTo(210,20,170,26,190,40);
+    x.bezierCurveTo(206,54,206,100,190,138);
+    x.bezierCurveTo(178,168,134,178,116,158);
+    x.bezierCurveTo(98,138,136,118,176,124);
+    x.bezierCurveTo(214,130,214,112,196,104);
+    x.bezierCurveTo(170,92,90,96,30,104);
     x.stroke();
     _rubrica={img:c.toDataURL('image/png'),w:W,h:H};
   }catch(e){_rubrica=null;}
@@ -1509,7 +1509,7 @@ function montarPdfEntrada(o,fotos){
     try{var ar=w/Math.max(1,h),sw=Math.min(larg,alt*ar),sh=sw/ar;doc.addImage(img,'PNG',cx-sw/2,base-0.5-sh,sw,sh);}catch(e){}
   }
   if(o.assinatura&&o.assinatura.img)assinaNaLinha(o.assinatura.img,o.assinatura.w||600,o.assinatura.h||200,cx1,70,18);
-  var rub=rubricaLoja();if(rub)assinaNaLinha(rub.img,rub.w,rub.h,cx2,40,16);
+  var rub=rubricaLoja();if(rub)assinaNaLinha(rub.img,rub.w,rub.h,cx2,58,21);
   doc.setDrawColor(70,70,70);doc.setLineWidth(0.35);doc.line(cx1-36,base,cx1+36,base);doc.line(cx2-36,base,cx2+36,base);
   doc.setFont('helvetica','bold');doc.setFontSize(8.5);doc.setTextColor(az[0],az[1],az[2]);
   doc.text(c.nome||'Cliente',cx1,base+5,{align:'center'});doc.text(PURIFIC.nome,cx2,base+5,{align:'center'});
