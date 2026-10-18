@@ -851,7 +851,7 @@ function detalheHtml(o,midias){
   var pz=o.prazos||{};
   h+='<div class="card"><h3>Prazos informados ao cliente</h3><dl class="kv">'
     +'<dt>Orçamento até</dt><dd>'+fmtData(pz.orcamento)+' '+situacaoPrazo(pz.orcamento,entregaOrc(o))+'</dd>'
-    +(o.aprovado===false?'':'<dt>Finalização até</dt><dd>'+(pz.entrega?fmtData(pz.entrega)+' '+situacaoPrazo(pz.entrega,o.tempos.servFim):'<span class="sub">definida quando o cliente aprovar</span>')+'</dd>')
+    +(o.aprovado===false?'':'<dt>Finalização até</dt><dd>'+(pz.entrega?fmtData(pz.entrega)+' '+situacaoPrazo(pz.entrega,o.tempos.servFim):'<span class="sub">definida pelo comercial ao colocar o preço</span>')+'</dd>')
     +'</dl><div style="text-align:right;margin-top:8px;"><button class="btn btn-g btn-sm" onclick="alterarPrazos(\''+o.id+'\')">📅 Alterar prazos</button></div></div>';
   /* Linha do tempo */
   var passos=[
@@ -936,7 +936,8 @@ function acoesHtml(o){
     case'em_orcamento':b='<button class="btn btn-p btn-lg" onclick="finalizarOrc(\''+id+'\')">📋 Finalizar orçamento</button>';break;
     case'aguardando_preco':b='<div class="info">A oficina terminou o orçamento técnico. O comercial coloca o preço e depois passa ao cliente.</div>'
       +'<button class="btn btn-p btn-lg" onclick="precificar(\''+id+'\')">💲 Colocar preço</button>';break;
-    case'aguardando_aprovacao':b='<div class="info">Ligue para o cliente e registre a resposta.<br>'+contaCliente(o)+'</div>'
+    case'aguardando_aprovacao':b='<div class="info">Ligue para o cliente e registre a resposta.<br>'+contaCliente(o)
+      +(o.prazos&&o.prazos.entrega?'<br>Previsão de término: <b>'+fmtData(o.prazos.entrega)+'</b>':'')+'</div>'
       +'<div class="actions"><button class="btn btn-ok" onclick="respostaCliente(\''+id+'\',true)">✔ Cliente aprovou</button>'
       +'<button class="btn btn-no" onclick="respostaCliente(\''+id+'\',false)">✖ Cliente não aprovou</button></div>';break;
     case'aprovado':b='<button class="btn btn-p btn-lg" onclick="iniciarServ(\''+id+'\')">🛠 Iniciar serviço</button>';break;
@@ -1002,7 +1003,9 @@ var IT=[];
 function precoFormHtml(o){
   var q=o.orcamento||{};
   IT=(q.itens||[]).map(function(x){return{tipo:x.tipo==='S'?'S':'P',id:x.id,nome:x.nome,codigo:x.codigo,qtd:x.qtd,valor:x.valor};});
+  var pzE=(o.prazos&&o.prazos.entrega)||maisDias(3);
   return'<div class="field"><label>Responsável comercial <span class="req">*</span></label><input id="ps-com" value="'+esc(o.comercial||lerLocal('comercial'))+'"/></div>'
+    +'<div class="field"><label>Previsão de término do serviço (passe ao cliente junto com o orçamento) <span class="req">*</span></label><input type="date" id="ps-termino" value="'+pzE+'"/></div>'
     +(o.blingId?'':'<div class="info">Esta OS não está ligada ao Bling (o número foi digitado à mão). Os itens ficam só no app.</div>')
     +'<div class="sec">Peças e serviços</div>'
     +'<div id="it-lista"></div>'
@@ -1057,12 +1060,13 @@ function corpoBling(lista){
 /* Lê os itens do formulário, lança no Bling (se a OS veio de lá) e devolve os
    campos do orçamento a gravar. Devolve false quando o usuário desiste. */
 async function salvarItens(o){
-  var com=val('ps-com');
+  var com=val('ps-com'),termino=val('ps-termino');
   if(!com){psErro('Informe o responsável comercial.');return false;}
+  if(!termino){psErro('Informe a previsão de término do serviço.');return false;}
   var itens=IT.map(function(x){return{tipo:x.tipo,id:x.id,nome:x.nome,codigo:x.codigo||'',qtd:x.qtd,valor:Math.round(x.valor*100)/100};});
   if(!itens.length){psErro('Adicione pelo menos uma peça ou serviço.');return false;}
   if(itens.some(function(x){return!(x.qtd>0);})){psErro('Quantidade precisa ser maior que zero.');return false;}
-  var pc=itSoma('P'),mo=itSoma('S'),r={comercial:com,itens:itens,valorPecas:pc,maoObra:mo,total:pc+mo,blingLancadoEm:null,blingErro:''};
+  var pc=itSoma('P'),mo=itSoma('S'),r={comercial:com,termino:termino,itens:itens,valorPecas:pc,maoObra:mo,total:pc+mo,blingLancadoEm:null,blingErro:''};
   gravarLocal('comercial',com);
   if(o.blingId){
     $('ps-ok').textContent='Lançando no Bling…';
@@ -1109,6 +1113,7 @@ function precificar(id){
     var noFluxo=o.etapa==='aguardando_preco';
     var upd=noFluxo?{etapa:'aguardando_aprovacao','tempos.precificado':Date.now(),comercial:r.comercial}:{comercial:r.comercial,'orcamento.precificadoEm':Date.now()};
     ['itens','valorPecas','maoObra','total','blingLancadoEm','blingErro'].forEach(function(k){upd['orcamento.'+k]=r[k];});
+    upd['prazos.entrega']=r.termino;
     await avancar(id,upd,(r.blingLancadoEm?'Itens lançados no Bling':'Preço salvo')+(noFluxo?' — passe ao cliente':''));
   });
   renderItens();
@@ -1175,7 +1180,7 @@ function editarOrc(id){
     var ant=o.orcamento||{},r=await salvarItens(o);if(!r)return false;
     var hist=(ant.historico||[]).slice();
     if(Math.abs((ant.total||0)-r.total)>0.001)hist.push({em:Date.now(),de:ant.total||0,para:r.total});
-    var upd={comercial:r.comercial,'orcamento.historico':hist,'orcamento.editadoEm':Date.now()};
+    var upd={comercial:r.comercial,'orcamento.historico':hist,'orcamento.editadoEm':Date.now(),'prazos.entrega':r.termino};
     ['itens','valorPecas','maoObra','total','blingLancadoEm','blingErro'].forEach(function(k){upd['orcamento.'+k]=r[k];});
     await avancar(id,upd,r.blingLancadoEm?'Preço atualizado e relançado no Bling':'Preço atualizado');
   });
@@ -1183,11 +1188,13 @@ function editarOrc(id){
 }
 function respostaCliente(id,aprovou){
   passoSimples(aprovou?'Cliente aprovou o orçamento':'Cliente não aprovou',
-    (aprovou?'<div class="field"><label>Previsão de finalização (informe ao cliente) <span class="req">*</span></label><input type="date" id="ps-prazo" value="'+maisDias(3)+'" min="'+maisDias(0)+'"/></div>':'')
+    (aprovou?((getOS(id).prazos||{}).entrega
+      ?'<div class="info">Previsão de término informada pelo comercial: <b>'+fmtData(getOS(id).prazos.entrega)+'</b>. Para mudar, use "Alterar prazos" na OS.</div>'
+      :'<div class="field"><label>Previsão de término (o comercial não definiu) <span class="req">*</span></label><input type="date" id="ps-prazo" value="'+maisDias(3)+'"/></div>'):'')
     +'<div class="field"><label>Observação (opcional)</label><textarea id="ps-obs" rows="2" placeholder="'+(aprovou?'Ex: pediu urgência':'Ex: achou caro, vai comprar um novo')+'"></textarea></div>',
     'Confirmar',async function(){
       var upd={etapa:aprovou?'aprovado':'devolver','tempos.resposta':Date.now(),aprovado:aprovou,obsResposta:val('ps-obs')};
-      if(aprovou){var pz=val('ps-prazo');if(!pz){psErro('Informe a previsão de finalização.');return false;}upd['prazos.entrega']=pz;}
+      if(aprovou&&$('ps-prazo')){var pz=val('ps-prazo');if(!pz){psErro('Informe a previsão de término.');return false;}upd['prazos.entrega']=pz;}
       await avancar(id,upd,
         aprovou?'Aprovado — vai para a fila da oficina':'Registrado — devolver ao cliente');
     });
