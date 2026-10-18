@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"/>
+<meta name="theme-color" content="#0c85aa"/>
+<title>Mapa dos técnicos · Purific</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css"/>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+<style>
+:root{--blue:#0c85aa;--blue-light:#e6f4f8;--blue-dark:#08607b;--text:#111827;--text2:#4b5563;--text3:#9ca3af;--border:#e5e7eb;--border2:#d1d5db;}
+*{box-sizing:border-box;margin:0;padding:0;}
+html,body{height:100%;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;font-size:14px;color:var(--text);background:#f0f4f8;}
+body{display:flex;flex-direction:column;}
+.top{background:var(--blue);color:#fff;padding:10px 14px;padding-top:calc(10px + env(safe-area-inset-top));display:flex;align-items:center;gap:10px;flex-wrap:wrap;}
+.top h1{font-size:16px;flex:1;white-space:nowrap;}
+.top input{border:none;border-radius:8px;padding:7px 10px;font:inherit;font-size:15px;}
+.top button{background:rgba(255,255,255,.2);color:#fff;border:none;border-radius:8px;padding:7px 10px;font:inherit;font-weight:600;cursor:pointer;}
+.main{flex:1;display:flex;min-height:0;}
+#mapa{flex:1;min-height:300px;}
+.lado{width:300px;background:#fff;overflow-y:auto;border-left:1px solid var(--border);padding:12px;}
+@media(max-width:760px){.main{flex-direction:column;}.lado{width:auto;max-height:42vh;border-left:none;border-top:1px solid var(--border);order:2;}#mapa{order:1;}}
+.tec{border:1px solid var(--border);border-radius:10px;padding:10px;margin-bottom:8px;cursor:pointer;}
+.tec.off{opacity:.45;}
+.tec .n{font-weight:700;display:flex;align-items:center;gap:8px;}
+.tec .n i{width:12px;height:12px;border-radius:50%;display:inline-block;flex:none;}
+.tec .s{font-size:12px;color:var(--text2);margin-top:3px;}
+.tec .z{font-size:12px;color:var(--blue);margin-top:4px;background:none;border:none;padding:0;cursor:pointer;text-decoration:underline;font:inherit;}
+.vazio{color:var(--text3);text-align:center;padding:20px 8px;}
+.dica{font-size:12px;color:var(--text3);margin-top:10px;line-height:1.4;}
+.err{background:#fde8e8;color:#e02424;border-radius:8px;padding:10px;margin-bottom:10px;}
+.ass{background:#0e9f6e;color:#fff;border-radius:50%;width:26px;height:26px;display:flex;align-items:center;justify-content:center;font-size:14px;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.4);}
+.ult{color:#fff;border-radius:14px;padding:3px 8px;font-size:12px;font-weight:700;white-space:nowrap;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.4);transform:translate(-50%,-130%);display:inline-block;}
+</style>
+</head>
+<body>
+<div class="top">
+  <h1>📍 Mapa dos técnicos</h1>
+  <button onclick="mudarDia(-1)">‹</button>
+  <input type="date" id="dia" onchange="carregar()"/>
+  <button onclick="mudarDia(1)">›</button>
+</div>
+<div class="main"><div id="mapa"></div><div class="lado" id="lado"><div class="vazio">Carregando…</div></div></div>
+<script>
+/* Caminho dos técnicos no dia, a partir das posições que o app de entregas
+   (/campo/) grava em campo_localizacoes: ao abrir o app, a cada 10 minutos
+   com ele aberto e em cada assinatura. Atualiza sozinho enquanto aberto. */
+var FB_CFG={
+  apiKey:"AIzaSyCdRdPIM7fjV-5prMCHs_3eYqS5aARSu5I",
+  authDomain:"aquapure-9100b.firebaseapp.com",
+  projectId:"aquapure-9100b",
+  storageBucket:"aquapure-9100b.firebasestorage.app",
+  messagingSenderId:"132328899335",
+  appId:"1:132328899335:web:d9e7b99354b51de0a37ba2"
+};
+var CORES=['#0c85aa','#e02424','#7c3aed','#c27803','#0e9f6e','#db2777','#2563eb','#65a30d'];
+var db=null,mapa=null,camada=null,unsub=null,pontos=[],ocultos={};
+function $(id){return document.getElementById(id);}
+function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];});}
+function pad(n){return n<10?'0'+n:''+n;}
+function hora(ms){var d=new Date(ms);return pad(d.getHours())+':'+pad(d.getMinutes());}
+function isoDe(d){return d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate());}
+function mudarDia(n){var d=new Date($('dia').value+'T12:00:00');d.setDate(d.getDate()+n);$('dia').value=isoDe(d);carregar();}
+/* Distância em km entre dois pontos (fórmula de haversine). */
+function km(a,b){var R=6371,r=Math.PI/180,dLa=(b.lat-a.lat)*r,dLo=(b.lng-a.lng)*r;
+  var h=Math.sin(dLa/2)*Math.sin(dLa/2)+Math.cos(a.lat*r)*Math.cos(b.lat*r)*Math.sin(dLo/2)*Math.sin(dLo/2);return 2*R*Math.asin(Math.sqrt(h));}
+
+function carregar(){
+  if(unsub)unsub();
+  if(!db)return;
+  unsub=db.collection('campo_localizacoes').where('dia','==',$('dia').value).onSnapshot(function(snap){
+    pontos=snap.docs.map(function(d){return d.data();}).filter(function(p){return p.lat&&p.lng;}).sort(function(a,b){return a.em-b.em;});
+    desenhar(true);
+  },function(e){$('lado').innerHTML='<div class="err">Erro ao ler as posições: '+esc(e.message)+'</div>';});
+}
+function porTecnico(){
+  var g={};pontos.forEach(function(p){(g[p.tecnico]=g[p.tecnico]||[]).push(p);});
+  var nomes=Object.keys(g).sort(function(a,b){return a.localeCompare(b);});
+  return nomes.map(function(n,i){return{nome:n,cor:CORES[i%CORES.length],pts:g[n]};});
+}
+var _enquadrado='';
+function desenhar(enquadrar){
+  camada.clearLayers();
+  var tecs=porTecnico(),limites=[];
+  tecs.forEach(function(t){
+    if(ocultos[t.nome])return;
+    var ll=t.pts.map(function(p){return[p.lat,p.lng];});
+    limites=limites.concat(ll);
+    if(ll.length>1)L.polyline(ll,{color:t.cor,weight:4,opacity:.8}).addTo(camada);
+    t.pts.forEach(function(p,i){
+      var txt='<b>'+esc(t.nome)+'</b><br>'+hora(p.em)+(p.precisao?' · precisão ~'+p.precisao+' m':'');
+      if(p.origem==='assinatura'){
+        L.marker([p.lat,p.lng],{icon:L.divIcon({className:'',html:'<div class="ass">✍️</div>',iconSize:[26,26],iconAnchor:[13,13]})})
+          .bindPopup(txt+'<br>Assinatura do pedido <b>'+esc(p.pedido||'')+'</b>'+(p.cliente?'<br>'+esc(p.cliente):'')).addTo(camada);
+      }else{
+        L.circleMarker([p.lat,p.lng],{radius:i===t.pts.length-1?8:5,color:'#fff',weight:2,fillColor:t.cor,fillOpacity:1}).bindPopup(txt).addTo(camada);
+      }
+    });
+    var u=t.pts[t.pts.length-1];
+    L.marker([u.lat,u.lng],{interactive:false,icon:L.divIcon({className:'',html:'<span class="ult" style="background:'+t.cor+'">'+esc(t.nome)+' · '+hora(u.em)+'</span>',iconSize:[0,0]})}).addTo(camada);
+  });
+  /* Enquadra só na troca de dia/técnico, não a cada posição nova. */
+  var chave=$('dia').value+'|'+Object.keys(ocultos).filter(function(k){return ocultos[k];}).join(',');
+  if(limites.length&&(enquadrar&&_enquadrado!==chave)){mapa.fitBounds(limites,{padding:[40,40],maxZoom:16});_enquadrado=chave;}
+  lado(tecs);
+}
+function lado(tecs){
+  if(!tecs.length){$('lado').innerHTML='<div class="vazio">Nenhuma posição registrada neste dia.</div>'+dica();return;}
+  $('lado').innerHTML=tecs.map(function(t,i){
+    var dist=0;for(var j=1;j<t.pts.length;j++)dist+=km(t.pts[j-1],t.pts[j]);
+    var u=t.pts[t.pts.length-1],ass=t.pts.filter(function(p){return p.origem==='assinatura';}).length;
+    return'<div class="tec'+(ocultos[t.nome]?' off':'')+'" onclick="alternar('+i+')">'
+      +'<div class="n"><i style="background:'+t.cor+'"></i>'+esc(t.nome)+'</div>'
+      +'<div class="s">Última posição: <b>'+hora(u.em)+'</b> · '+t.pts.length+' pontos · '+ass+' assinatura'+(ass===1?'':'s')+'</div>'
+      +'<div class="s">De '+hora(t.pts[0].em)+' a '+hora(u.em)+' · ~'+dist.toFixed(1).replace('.',',')+' km (linha reta entre os pontos)</div>'
+      +'<button class="z" onclick="event.stopPropagation();focar('+i+')">Ver no mapa</button></div>';
+  }).join('')+dica();
+}
+function dica(){return'<div class="dica">A posição é registrada quando o técnico abre o app de entregas, a cada 10 minutos com o app aberto na tela e em cada assinatura (✍️). Com o celular bloqueado ou o app fechado, não há registro.</div>';}
+function alternar(i){var t=porTecnico()[i];ocultos[t.nome]=!ocultos[t.nome];desenhar(true);}
+function focar(i){var t=porTecnico()[i];ocultos[t.nome]=false;var u=t.pts[t.pts.length-1];desenhar(false);mapa.setView([u.lat,u.lng],15);}
+
+(function(){
+  $('dia').value=isoDe(new Date());
+  mapa=L.map('mapa').setView([-23.5015,-47.4526],12);
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19,attribution:'&copy; OpenStreetMap'}).addTo(mapa);
+  camada=L.layerGroup().addTo(mapa);
+  try{firebase.initializeApp(FB_CFG);db=firebase.firestore();}
+  catch(e){$('lado').innerHTML='<div class="err">Falha ao iniciar o Firebase: '+esc(e.message)+'</div>';return;}
+  carregar();
+})();
+</script>
+</body>
+</html>

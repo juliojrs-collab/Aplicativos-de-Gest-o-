@@ -18,3 +18,8 @@ recebeu, o cliente assina na tela (com hora e GPS) e o PDF assinado vai para o
 WhatsApp do cliente pelo número oficial, via `whatsapp-crm`:
 `GET /api/bling/campo/pedidos`, `GET /api/bling/campo/pedidos/:id`, `POST /api/bling/campo/enviar`.
 Coleções no Firebase: `campo_pedidos`, `campo_midias`, `campo_tecnicos`.
+
+Mapa dos técnicos em `<site>/campo/mapa/`: caminho do dia de cada técnico, com
+as posições que o app grava em `campo_localizacoes` ao ser aberto, a cada
+10 minutos com ele aberto na tela e em cada assinatura. Com o celular
+bloqueado ou o app fechado, o navegador não entrega o GPS.

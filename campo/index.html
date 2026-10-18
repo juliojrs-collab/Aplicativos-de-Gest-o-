@@ -121,7 +121,8 @@ main{max-width:760px;margin:0 auto;padding:14px 14px 96px;}
    Mesmo projeto Firebase da Oficina, em coleções próprias:
    - campo_pedidos  → o registro do atendimento (id = id do pedido no Bling)
    - campo_midias   → uma foto por documento, carregadas só ao abrir o pedido
-   - campo_tecnicos → nomes dos técnicos de rua */
+   - campo_tecnicos → nomes dos técnicos de rua
+   - campo_localizacoes → posição do técnico (ver "Localização" abaixo) */
 var FB_CFG={
   apiKey:"AIzaSyCdRdPIM7fjV-5prMCHs_3eYqS5aARSu5I",
   authDomain:"aquapure-9100b.firebaseapp.com",
@@ -131,7 +132,7 @@ var FB_CFG={
   appId:"1:132328899335:web:d9e7b99354b51de0a37ba2"
 };
 var API='https://whatsapp-crm-production-66bf.up.railway.app';
-var C_REG='campo_pedidos',C_MID='campo_midias',C_TEC='campo_tecnicos';
+var C_LOC='campo_localizacoes',C_REG='campo_pedidos',C_MID='campo_midias',C_TEC='campo_tecnicos';
 var MAX_FOTOS=8;
 var TERMO='Declaro que recebi nesta data os produtos e/ou serviços descritos neste pedido, nas condições registradas acima.';
 
@@ -207,12 +208,12 @@ function renderQuem(){
     +'<button class="btn btn-p btn-lg" onclick="salvarTec()">Continuar</button></div>';
   $('app').innerHTML=h;
 }
-function escolherTec(i){S.tecnico=S.tecs[i];lsSet('campo_tecnico',S.tecnico);S.tela='lista';render();if(!S.lista)carregarLista();}
+function escolherTec(i){S.tecnico=S.tecs[i];lsSet('campo_tecnico',S.tecnico);S.tela='lista';render();if(!S.lista)carregarLista();iniciarLocal();}
 function salvarTec(){
   var n=val('q-nome');if(!n){toast('Digite seu nome');return;}
   S.tecnico=n;lsSet('campo_tecnico',n);
   if(db&&S.tecs.map(semAcento).indexOf(semAcento(n))<0)db.collection(C_TEC).add({nome:n,criadoEm:Date.now()}).catch(function(){});
-  S.tela='lista';render();if(!S.lista)carregarLista();
+  S.tela='lista';render();if(!S.lista)carregarLista();iniciarLocal();
 }
 
 /* ═══ Entregas (pedidos do Bling pela data prevista = dia da entrega) ═══
@@ -543,6 +544,7 @@ async function confirmarAssin(){
   /* Assinatura rápida: espera até 8s pelo GPS antes de gravar. */
   if(!LOCAL&&LOCAL_P){toast('Registrando localização…');await Promise.race([LOCAL_P,new Promise(function(ok){setTimeout(ok,8000);})]);}
   await salvarCampos({assinatura:a,local:LOCAL||null}).catch(function(e){toast('Erro ao salvar: '+e.message);});
+  if(LOCAL)gravarLocal(LOCAL,LOCAL.em,'assinatura',{pedido:S.ped.numero||'',cliente:(S.ped.cliente&&S.ped.cliente.nome)||''});
   renderPedido();
   toast('Assinatura salva');
   if($('b-env'))enviarWhats();
@@ -773,12 +775,40 @@ async function enviarWhats(){
   if(S.tela==='ped'&&String(S.ped.id)===id)renderPedido();
 }
 
+/* ═══ Localização do técnico ════════════════════════════════════════════
+   Sem app instalado o navegador só entrega o GPS com o app aberto na tela:
+   grava a posição ao abrir o app, a cada 10 minutos enquanto ele estiver
+   aberto e na assinatura de cada pedido. A tela /campo/mapa/ desenha o
+   caminho do dia. */
+var LOC_INTERVALO=10*60*1000,_ultLoc=0,_locTimer=null;
+function registrarLocal(origem,extra){
+  if(!db||!S.tecnico||!navigator.geolocation)return;
+  if(origem!=='assinatura'&&Date.now()-_ultLoc<2*60*1000)return;
+  _ultLoc=Date.now();
+  navigator.geolocation.getCurrentPosition(function(p){gravarLocal(p.coords,p.timestamp,origem,extra);},
+    function(){},{enableHighAccuracy:true,timeout:30000,maximumAge:60000});
+}
+function gravarLocal(c,em,origem,extra){
+  var d=new Date(em||Date.now());
+  var doc={tecnico:S.tecnico,lat:c.latitude!=null?c.latitude:c.lat,lng:c.longitude!=null?c.longitude:c.lng,
+    precisao:Math.round(c.accuracy!=null?c.accuracy:(c.precisao||0)),em:d.getTime(),
+    dia:d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate()),origem:origem};
+  if(extra)for(var k in extra)doc[k]=extra[k];
+  db.collection(C_LOC).add(doc).catch(function(){});
+}
+function iniciarLocal(){
+  registrarLocal('abertura');
+  if(_locTimer)clearInterval(_locTimer);
+  _locTimer=setInterval(function(){if(document.visibilityState==='visible')registrarLocal('periodico');},LOC_INTERVALO);
+  document.addEventListener('visibilitychange',function(){if(document.visibilityState==='visible')registrarLocal('abertura');});
+}
+
 /* ═══ Início ═════════════════════════════════════════════════════════════ */
 (function(){
   if(initFirebase())listen();
   try{var c=JSON.parse(lsGet('campo_lista')||'null');if(c&&c.lista&&c.hoje){S.lista=c.lista;S.hoje=c.hoje;}}catch(e){}
   render();
-  if(S.tecnico)carregarLista();
+  if(S.tecnico){carregarLista();iniciarLocal();}
 })();
 </script>
 </body>
