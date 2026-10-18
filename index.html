@@ -103,6 +103,11 @@ main{max-width:1100px;margin:0 auto;padding:16px 16px 96px;}
 .grp{display:flex;align-items:center;gap:8px;margin:18px 0 8px;font-size:13px;}
 .grp:first-of-type{margin-top:4px;}
 .os-late{border-left:4px solid var(--red);}
+.imp-row{display:flex;gap:10px;align-items:center;padding:10px 4px;border-bottom:1px solid var(--border);cursor:pointer;}
+.imp-row input{width:20px;height:20px;flex:none;}
+.imp-row>div{flex:1;min-width:0;font-size:13px;}
+.imp-off{opacity:.5;}
+.os-ap{color:var(--text);font-weight:600;}
 .b-orange{background:#fdeedd;color:#b45309;}
 .b-gray{background:#eef0f3;color:var(--text2);}
 .late{color:var(--red);font-weight:700;}
@@ -173,6 +178,7 @@ th{font-size:11px;color:var(--text2);text-transform:uppercase;}
 </div>
 <main id="app"><div class="empty">Carregando…</div></main>
 <div id="modal"></div>
+<datalist id="cores"><option>Branco</option><option>Preto</option><option>Prata</option><option>Inox</option><option>Cinza</option><option>Grafite</option><option>Azul</option><option>Vermelho</option></datalist>
 <script>
 /* ═══ Configuração ════════════════════════════════════════════════════════
    Mesmo projeto Firebase do AquaPure, mas em coleções próprias: este app nunca
@@ -566,9 +572,10 @@ function vLista(){
   var q=S.busca.toLowerCase();
   var list=S.os.filter(fil.f).filter(function(o){
     if(!q)return true;
-    return [o.numero,o.cliente&&o.cliente.nome,o.cliente&&o.cliente.telefone,o.marca,o.modelo,o.nSerie].join(' ').toLowerCase().indexOf(q)>=0;
+    return [o.numero,o.cliente&&o.cliente.nome,o.cliente&&o.cliente.telefone,o.marca,o.modelo,o.cor,o.nSerie].join(' ').toLowerCase().indexOf(q)>=0;
   });
-  var h='<div class="ph"><div><h2>Ordens de serviço</h2><p class="sub">'+S.os.filter(FILTROS[0].f).length+' abertas · '+S.os.length+' no total</p></div></div>';
+  var h='<div class="ph"><div><h2>Ordens de serviço</h2><p class="sub">'+S.os.filter(FILTROS[0].f).length+' abertas · '+S.os.length+' no total</p></div>'
+    +'<button class="btn btn-g btn-sm" onclick="importarBling()">⬇ Importar do Bling</button></div>';
   h+='<input class="search" id="busca" placeholder="Buscar por nº da OS, cliente, telefone, modelo…" value="'+esc(S.busca)+'" oninput="S.busca=this.value;S._focoBusca=true;render()"/>';
   h+='<div class="chips">'+FILTROS.map(function(x){
     var n=S.os.filter(x.f).length;
@@ -594,12 +601,72 @@ function cardOS(o,agrupado){
     h+='<div class="card os'+(prazoVencido(o)?' os-late':'')+'" onclick="abrirOS(\''+o.id+'\')">'
       +'<div class="os-num">'+esc(o.numero||'s/ nº')+'</div>'
       +'<div class="os-main"><div class="t">'+esc(o.cliente&&o.cliente.nome||'-')+'</div>'
-      +'<div class="s">'+esc(aparelho(o))+(o.tecnico?' · '+esc(o.tecnico):'')+'</div></div>'
+      +'<div class="s os-ap">'+esc(aparelho(o))+(o.cor?' · <b>'+esc(o.cor)+'</b>':'')+'</div>'
+      +(o.tecnico?'<div class="s">'+esc(o.tecnico)+'</div>':'')+'</div>'
       +'<div class="os-side">'+(agrupado?'':etapaBadge(o.etapa))
       +(prazoAtual(o)?'<div style="'+(agrupado?'':'margin-top:4px;')+'">'+prazoBadge(o)+'</div>':'')
       +(o.etapa!=='entregue'&&d!=null?'<div class="'+(atrasada(o)?'late':'sub')+'" style="margin-top:4px;">na etapa há '+fmtDur(d)+'</div>':'<div class="sub" style="margin-top:4px;">'+fmtDH(o.tempos.entregue)+'</div>')
       +'</div></div>';
     return h;
+}
+
+/* ═══ Importar OS do Bling ═════════════════════════════════════════════
+   Traz as OS que já estavam abertas no Bling antes do app: "Em aberto" vira
+   "Aguardando orçamento" e "Orçada" vira "Aguardando cliente". Ficam marcadas
+   como importadas e fora da Medição (não têm os horários de cada etapa). */
+var IMP=[];
+function msDoDia(iso){var p=iso.split('-');return new Date(+p[0],p[1]-1,+p[2],12,0,0).getTime();}
+async function importarBling(){
+  modal('Importar OS do Bling','<div class="info">Buscando no Bling as OS "Em aberto" e "Orçada" dos últimos 45 dias… pode levar até um minuto.</div>');
+  S.modo='passo';
+  try{
+    var r=await fetch(API+'/api/bling/os/importar');
+    var j=await r.json().catch(function(){return{};});
+    if(!r.ok)throw new Error(j.error||('HTTP '+r.status));
+    var noApp={};S.os.forEach(function(o){if(o.blingId)noApp[String(o.blingId)]=1;});
+    IMP=(j.lista||[]).map(function(x){x.jaExiste=!!noApp[String(x.blingId)];return x;});
+    var novas=IMP.filter(function(x){return!x.jaExiste;});
+    var h='<div class="info">Encontradas <b>'+IMP.length+'</b> OS desde '+fmtData(j.desde)+'. '+(IMP.length-novas.length?(IMP.length-novas.length)+' já estão no app. ':'')+'Marque as que vão entrar.</div>';
+    h+=IMP.map(function(x,i){
+      return'<label class="imp-row'+(x.jaExiste?' imp-off':'')+'"><input type="checkbox" data-i="'+i+'" '+(x.jaExiste?'disabled':'checked')+'/>'
+        +'<div><b>OS '+esc(x.numero)+'</b> · '+esc(x.cliente.nome||'-')+'<br><small>'+fmtData(x.data)+' · '+esc(x.equipamento||'aparelho não informado')+'</small></div>'
+        +'<span class="badge '+(oficinaSit(x.situacao)==='orcada'?'b-purple':'b-blue')+'">'+esc(x.situacao)+(x.jaExiste?' · já no app':'')+'</span></label>';
+    }).join('');
+    h+='<div id="ps-err"></div><div class="actions"><button class="btn btn-g" onclick="fecharModal()">Cancelar</button><button class="btn btn-p" id="imp-ok" onclick="confirmarImportacao()">Importar marcadas</button></div>';
+    $('mdl-b').innerHTML=h;
+  }catch(e){$('mdl-b').innerHTML='<div class="err">Não foi possível buscar no Bling: '+esc(e.message)+'</div>';}
+}
+function oficinaSit(t){return String(t||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().trim();}
+async function confirmarImportacao(){
+  var marcadas=Array.prototype.slice.call(document.querySelectorAll('.imp-row input:checked')).map(function(c){return IMP[+c.getAttribute('data-i')];});
+  if(!marcadas.length){psErro('Marque pelo menos uma OS.');return;}
+  var b=$('imp-ok');b.disabled=true;
+  var agora=Date.now(),n=0;
+  try{
+    for(var i=0;i<marcadas.length;i++){
+      var x=marcadas[i],orcada=oficinaSit(x.situacao)==='orcada';
+      var receb=x.data?msDoDia(x.data):agora;
+      var os={
+        numero:x.numero,blingId:x.blingId,cliente:x.cliente,marca:x.equipamento||'Purificador',modelo:'',nSerie:x.numeroSerie||'',
+        problema:x.problema||'',questionario:[x.observacoes,x.observacoesInternas].filter(Boolean).join('\n\n'),
+        etapa:orcada?'aguardando_aprovacao':'recebido',
+        tempos:{recebido:receb},criadoEm:receb,atualizadoEm:agora,
+        /* Orçada: o orçamento já foi passado ao cliente, então não há prazo de
+           orçamento a cumprir. */
+        prazos:(!orcada&&x.dataPrevista)?{orcamento:x.dataPrevista}:{},
+        importado:{em:agora,situacaoBling:x.situacao},midias:{}
+      };
+      if(orcada){
+        var pc=0,mo=0;(x.itens||[]).forEach(function(it){if(it.tipo==='S')mo+=it.qtd*it.valor;else pc+=it.qtd*it.valor;});
+        os.orcamento={diagnostico:'(importado do Bling)',itens:x.itens||[],valorPecas:pc,maoObra:mo,total:x.total||pc+mo,precificadoEm:agora};
+        if(x.tecnico)os.tecnicoOrc=x.tecnico;
+        os.tempos.informado=agora;
+      }
+      b.textContent='Importando '+(i+1)+' de '+marcadas.length+'…';
+      await db.collection(C_OS).add(os);n++;
+    }
+    fecharModal();toast(n+' OS importadas do Bling');S.filtro='abertas';render();
+  }catch(e){b.disabled=false;b.textContent='Importar marcadas';psErro('Parou na '+(n+1)+'ª OS: '+e.message+' ('+n+' já importadas; rode de novo que as importadas são puladas).');}
 }
 
 /* ═══ Modal ══════════════════════════════════════════════════════════════ */
@@ -732,6 +799,7 @@ function novaOS(){
     +'<div class="sec">Aparelho</div>'
     +'<div class="g2"><div class="field"><label>Marca <span class="req">*</span></label><input id="nv-marca" placeholder="Ex: Electrolux"/></div>'
     +'<div class="field"><label>Modelo <span class="req">*</span></label><input id="nv-modelo" placeholder="Ex: PA30G"/></div></div>'
+    +'<div class="field"><label>Cor</label><input id="nv-cor" list="cores" placeholder="Ex: branco, preto, prata"/></div>'
     +'<div class="g2"><div class="field"><label>Nº de série</label><input id="nv-serie"/></div>'
     +'<div class="field"><label>Condição de limpeza</label><select id="nv-cond"><option value="">Selecione…</option>'+cond+'</select></div></div>'
     +'<div class="field"><label>Acessórios que vieram junto</label><input id="nv-acess" placeholder="Ex: refil, bandeja, mangueira, fonte…"/></div>'
@@ -802,7 +870,7 @@ async function salvarNovaOS(){
   var cli=NV.contato?{nome:NV.contato.nome,blingId:NV.contato.id,documento:NV.contato.documento||'',telefone:val('nv-tel')}
                     :{nome:val('nv-nome'),documento:val('nv-doc'),telefone:val('nv-tel'),blingId:null};
   var os={
-    cliente:cli,marca:val('nv-marca'),modelo:val('nv-modelo'),nSerie:val('nv-serie'),condicao:val('nv-cond'),
+    cliente:cli,marca:val('nv-marca'),modelo:val('nv-modelo'),cor:val('nv-cor'),nSerie:val('nv-serie'),condicao:val('nv-cond'),
     acessorios:val('nv-acess'),problema:val('nv-prob'),atendente:val('nv-atend'),prazos:{orcamento:val('nv-prazo')}
   };
   var falta=[];
@@ -918,11 +986,11 @@ function detalheHtml(o,midias){
   /* Dados */
   var c=o.cliente||{};
   h+='<div class="card"><h3>Recepção</h3><dl class="kv">'
-    +'<dt>Nº OS</dt><dd>'+esc(o.numero||'-')+(o.blingId?' <span class="badge b-green">Bling</span>':'')+'</dd>'
+    +'<dt>Nº OS</dt><dd>'+esc(o.numero||'-')+(o.blingId?' <span class="badge b-green">Bling</span>':'')+(o.importado?' <span class="badge b-gray">importada ('+esc(o.importado.situacaoBling||'')+')</span>':'')+'</dd>'
     +'<dt>Cliente</dt><dd>'+esc(c.nome||'-')+'</dd>'
     +'<dt>Telefone</dt><dd>'+esc(c.telefone||'-')+'</dd>'
     +(c.documento?'<dt>CPF/CNPJ</dt><dd>'+esc(c.documento)+'</dd>':'')
-    +'<dt>Aparelho</dt><dd>'+esc(aparelho(o))+(o.nSerie?' · série '+esc(o.nSerie):'')+'</dd>'
+    +'<dt>Aparelho</dt><dd>'+esc(aparelho(o))+(o.cor?' · '+esc(o.cor):'')+(o.nSerie?' · série '+esc(o.nSerie):'')+'</dd>'
     +(o.condicao?'<dt>Condição</dt><dd>'+esc(o.condicao)+'</dd>':'')
     +(o.acessorios?'<dt>Acessórios</dt><dd>'+esc(o.acessorios)+'</dd>':'')
     +'<dt>Problema relatado</dt><dd>'+esc(o.problema||'-')+'</dd>'
@@ -975,7 +1043,7 @@ function acoesHtml(o){
     case'em_orcamento':b='<button class="btn btn-p btn-lg" onclick="finalizarOrc(\''+id+'\')">📋 Finalizar orçamento</button>';break;
     case'aguardando_preco':b='<div class="info">A oficina terminou o orçamento técnico. O comercial coloca o preço e depois passa ao cliente.</div>'
       +'<button class="btn btn-p btn-lg" onclick="precificar(\''+id+'\')">💲 Colocar preço</button>';break;
-    case'aguardando_aprovacao':b='<div class="info">'+(o.tempos.informado?'Cliente informado em '+fmtDH(o.tempos.informado)+'. Aguardando a resposta.':'Passe o orçamento ao cliente e registre.')+'<br>'+contaCliente(o)
+    case'aguardando_aprovacao':b='<div class="info">'+(o.importado&&o.importado.situacaoBling&&o.tempos.informado&&o.tempos.informado===o.importado.em?'Orçamento passado ao cliente antes do app (importada do Bling). Aguardando a resposta.':o.tempos.informado?'Cliente informado em '+fmtDH(o.tempos.informado)+'. Aguardando a resposta.':'Passe o orçamento ao cliente e registre.')+'<br>'+contaCliente(o)
       +(o.prazos&&o.prazos.entrega?'<br>Previsão de término: <b>'+fmtData(o.prazos.entrega)+'</b>':'')+'</div>'
       +(o.tempos.informado?'':'<button class="btn btn-p btn-lg" style="margin-bottom:8px;" onclick="clienteInformado(\''+id+'\')">📞 Orçamento passado ao cliente</button>')
       +'<div class="actions"><button class="btn btn-ok" onclick="respostaCliente(\''+id+'\',true)">✔ Cliente aprovou</button>'
@@ -1356,6 +1424,7 @@ function editarRecepcao(id){
     +'<div class="field"><label>Telefone</label><input id="ed-tel" value="'+esc(c.telefone||'')+'"/></div></div>'
     +'<div class="g2"><div class="field"><label>Marca</label><input id="ed-marca" value="'+esc(o.marca||'')+'"/></div>'
     +'<div class="field"><label>Modelo</label><input id="ed-modelo" value="'+esc(o.modelo||'')+'"/></div></div>'
+    +'<div class="field"><label>Cor</label><input id="ed-cor" list="cores" value="'+esc(o.cor||'')+'"/></div>'
     +'<div class="g2"><div class="field"><label>Nº de série</label><input id="ed-serie" value="'+esc(o.nSerie||'')+'"/></div>'
     +'<div class="field"><label>Condição</label><select id="ed-cond"><option value="">-</option>'+cond+'</select></div></div>'
     +'<div class="field"><label>Acessórios</label><input id="ed-acess" value="'+esc(o.acessorios||'')+'"/></div>'
@@ -1366,7 +1435,7 @@ function editarRecepcao(id){
       var qz=o.respostas?questLer('ed'):null;
       if(qz&&qz.falta.length){psErro('Responda a pergunta '+qz.falta.join(', ')+' do questionário.');return false;}
       var qupd=qz?{respostas:qz.respostas,questionario:questTexto(qz.respostas)}:{questionario:val('ed-quest')};
-      await avancar(id,Object.assign(qupd,{numero:val('ed-num'),'cliente.nome':val('ed-nome'),'cliente.telefone':val('ed-tel'),marca:val('ed-marca'),modelo:val('ed-modelo'),
+      await avancar(id,Object.assign(qupd,{numero:val('ed-num'),'cliente.nome':val('ed-nome'),'cliente.telefone':val('ed-tel'),marca:val('ed-marca'),modelo:val('ed-modelo'),cor:val('ed-cor'),
         nSerie:val('ed-serie'),condicao:val('ed-cond'),acessorios:val('ed-acess'),problema:val('ed-prob')}),'Dados atualizados');
     });
 }
@@ -1599,7 +1668,7 @@ function montarPdfEntrada(o,fotos){
   section('Cliente');
   line('Nome',c.nome);line('Telefone',c.telefone);line('CPF/CNPJ',c.documento);
   section('Aparelho');
-  line('Purificador',aparelho(o));line('N° de série',o.nSerie);
+  line('Purificador',aparelho(o));line('Cor',o.cor);line('N° de série',o.nSerie);
   if(o.prazos&&o.prazos.orcamento)line('Previsão do orçamento',fmtData(o.prazos.orcamento));
   line('Condição de limpeza',o.condicao);line('Acessórios entregues',o.acessorios||'Nenhum');
   section('Problema relatado pelo cliente');
@@ -1671,7 +1740,8 @@ function media(arr){if(!arr.length)return null;return arr.reduce(function(a,b){r
 function mediana(arr){if(!arr.length)return null;var s=arr.slice().sort(function(a,b){return a-b;});var m=Math.floor(s.length/2);return s.length%2?s[m]:(s[m-1]+s[m])/2;}
 function vPainel(){
   var dias=S.dash.dias,desde=dias?Date.now()-dias*86400000:0;
-  var per=S.os.filter(function(o){return(o.tempos.recebido||o.criadoEm||0)>=desde;});
+  /* Importadas do Bling não têm os horários de cada etapa: ficam fora. */
+  var per=S.os.filter(function(o){return!o.importado&&(o.tempos.recebido||o.criadoEm||0)>=desde;});
   var abertas=S.os.filter(function(o){return o.etapa!=='entregue';});
   var paradas=abertas.filter(atrasada).sort(function(a,b){return desdeEtapa(b)-desdeEtapa(a);});
   var entregues=per.filter(function(o){return o.etapa==='entregue';});
