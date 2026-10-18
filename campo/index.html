@@ -139,7 +139,7 @@ var TERMO='Declaro que recebi nesta data os produtos e/ou serviços descritos ne
 var db=null,FB_ERR='';
 var S={
   tela:'lista',tecnico:lsGet('campo_tecnico')||'',tecs:[],
-  lista:null,listaErr:'',carregando:false,filtro:lsGet('campo_filtro')||'hoje',dias:Number(lsGet('campo_dias'))||7,busca:'',
+  lista:null,listaErr:'',carregando:false,filtro:'hoje',hoje:'',busca:'',
   reg:{},              /* campo_pedidos por id do pedido no Bling */
   ped:null,pedErr:'',midias:[],enviando:false
 };
@@ -215,18 +215,35 @@ function salvarTec(){
   S.tela='lista';render();if(!S.lista)carregarLista();
 }
 
-/* ═══ Lista de pedidos (vem do Bling) ═══════════════════════════════════ */
+/* ═══ Entregas (pedidos do Bling pela data prevista = dia da entrega) ═══ */
 async function carregarLista(){
   if(S.carregando)return;
   S.carregando=true;S.listaErr='';renderLista();
   try{
-    S.lista=await api('/api/bling/campo/pedidos?dias='+S.dias);
-    lsSet('campo_lista',JSON.stringify({em:Date.now(),dias:S.dias,lista:S.lista}));
+    var r=await api('/api/bling/campo/pedidos?antes=7&depois=7');
+    S.lista=r.pedidos;S.hoje=r.hoje;
+    lsSet('campo_lista',JSON.stringify({em:Date.now(),hoje:r.hoje,lista:S.lista}));
+    /* Abre em "Atrasados" só se não houver nada para hoje. */
+    if(S.filtro==='hoje'&&!S.lista.some(ehHoje)&&S.lista.some(ehAtrasado))S.filtro='atrasados';
   }catch(e){S.listaErr=e.message;}
   S.carregando=false;
   if(S.tela==='lista')renderLista();
 }
-function ehHoje(o){var h=hojeISO();return String(o.dataPrevista||'').slice(0,10)===h||String(o.data||'').slice(0,10)===h;}
+function diaMais(n){var d=new Date((S.hoje||hojeISO())+'T12:00:00');d.setDate(d.getDate()+n);return d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate());}
+function prev(o){return String(o.dataPrevista||'').slice(0,10);}
+function assinado(o){var r=S.reg[String(o.id)];return!!(r&&r.assinatura);}
+function ehHoje(o){return prev(o)===(S.hoje||hojeISO());}
+function ehAmanha(o){return prev(o)===diaMais(1);}
+function ehProximo(o){return prev(o)>diaMais(1);}
+/* Atrasado: entrega já passou, ninguém assinou pelo app e o Bling não marcou como atendido. */
+function ehAtrasado(o){return prev(o)<(S.hoje||hojeISO())&&!assinado(o)&&!/atendid/i.test(o.situacao||'');}
+var DIAS_SEM=['dom','seg','ter','qua','qui','sex','sáb'];
+function rotuloDia(iso){
+  if(iso===(S.hoje||hojeISO()))return'Hoje';
+  if(iso===diaMais(1))return'Amanhã';
+  if(iso===diaMais(-1))return'Ontem';
+  var d=new Date(iso+'T12:00:00');return DIAS_SEM[d.getDay()]+', '+fmtData(iso);
+}
 function statusReg(id){
   var r=S.reg[String(id)];
   if(!r)return'';
@@ -234,62 +251,64 @@ function statusReg(id){
   if(r.assinatura)return'<span class="badge b-amber">Assinado · não enviado</span>';
   return'<span class="badge b-gray">Em atendimento</span>';
 }
+var FILTROS=[
+  {k:'atrasados',l:'⚠️ Atrasados',f:ehAtrasado},
+  {k:'hoje',l:'Hoje',f:ehHoje},
+  {k:'amanha',l:'Amanhã',f:ehAmanha},
+  {k:'proximos',l:'Próximos',f:ehProximo}
+];
 function renderLista(){
   if(!S.tecnico)return renderQuem();
   $('top').innerHTML='<h1>🚚 Entregas</h1><button class="who" onclick="S.tela=\'quem\';render()">👷 '+esc(S.tecnico)+'</button>';
   var lista=S.lista||[];
-  /* Uma aba por situação do Bling, na ordem em que aparecem mais vezes. */
-  var cont={};lista.forEach(function(o){var k=o.situacao||'Sem situação';cont[k]=(cont[k]||0)+1;});
-  var sits=Object.keys(cont).sort(function(a,b){return cont[b]-cont[a];});
-  if(S.filtro.indexOf('sit:')===0&&!cont[S.filtro.slice(4)]&&S.lista)S.filtro='todos';
-  function chip(k,rot){return'<button class="chip'+(S.filtro===k?' on':'')+'" onclick="filtrar(\''+esc(k).replace(/'/g,"\\'")+'\')">'+rot+'</button>';}
   var h='<input class="search" id="busca" placeholder="Buscar nº do pedido ou cliente" value="'+esc(S.busca)+'" oninput="S.busca=this.value;desenharItens()"/>'
     +'<div class="chips">'
-    +chip('hoje','Hoje ('+lista.filter(ehHoje).length+')')
-    +chip('todos','Todos ('+lista.length+')')
-    +chip('feitas','✍️ Assinados ('+Object.keys(S.reg).length+')')
-    +sits.map(function(k){return chip('sit:'+k,esc(k)+' ('+cont[k]+')');}).join('')
-    +'</div><div class="chips">'
-    +[3,7,15,30].map(function(d){return'<button class="chip'+(S.dias===d?' on':'')+'" onclick="mudarDias('+d+')">'+d+' dias</button>';}).join('')
-    +'<button class="chip" onclick="carregarLista()">'+(S.carregando?'<span class="spin"></span>':'↻')+' Atualizar</button></div>';
+    +FILTROS.map(function(x){var n=lista.filter(x.f).length;if(x.k==='atrasados'&&!n&&S.filtro!=='atrasados')return'';
+      return'<button class="chip'+(S.filtro===x.k?' on':'')+'" onclick="filtrar(\''+x.k+'\')">'+x.l+' ('+n+')</button>';}).join('')
+    +'<button class="chip'+(S.filtro==='feitas'?' on':'')+'" onclick="filtrar(\'feitas\')">✍️ Assinados ('+Object.keys(S.reg).length+')</button>'
+    +'<button class="chip" onclick="carregarLista()">'+(S.carregando?'<span class="spin"></span>':'↻')+'</button></div>';
   if(S.listaErr)h+='<div class="err">Não foi possível buscar os pedidos no Bling: '+esc(S.listaErr)+'</div>';
-  if(S.carregando&&!S.lista)h+='<div class="info"><span class="spin"></span> Buscando os pedidos no Bling…</div>';
+  if(S.carregando&&!S.lista)h+='<div class="info"><span class="spin"></span> Buscando as entregas no Bling…</div>';
   h+='<div id="itens"></div>';
   $('app').innerHTML=h;
   desenharItens();
 }
-function filtrar(f){S.filtro=f;lsSet('campo_filtro',f);renderLista();}
-function mudarDias(d){S.dias=d;lsSet('campo_dias',String(d));S.lista=null;carregarLista();}
+function filtrar(f){S.filtro=f;renderLista();}
 function desenharItens(){
   var el=$('itens');if(!el)return;
-  var lista=(S.lista||[]).slice();
-  if(S.filtro==='hoje')lista=lista.filter(ehHoje);
-  if(S.filtro.indexOf('sit:')===0){var st=S.filtro.slice(4);lista=lista.filter(function(o){return(o.situacao||'Sem situação')===st;});}
-  if(S.filtro==='feitas'){
-    /* Assinados: do registro no Firebase (inclui os que já saíram do período). */
-    lista=Object.keys(S.reg).map(function(id){var r=S.reg[id];return{id:Number(id),numero:r.numero,cliente:r.cliente,total:r.total,_em:r.atualizadoEm};})
+  var lista=(S.lista||[]).slice(),q=semAcento(S.busca);
+  if(q){
+    /* Busca procura em todo o período, não só na aba aberta. */
+    lista=lista.filter(function(o){return semAcento([o.numero,o.cliente].join(' ')).indexOf(q)>=0;});
+  }else if(S.filtro==='feitas'){
+    lista=Object.keys(S.reg).map(function(id){var r=S.reg[id];return{id:Number(id),numero:r.numero,cliente:r.cliente,total:r.total,dataPrevista:r.pedido&&r.pedido.dataPrevista,_em:r.atualizadoEm};})
       .sort(function(a,b){return(b._em||0)-(a._em||0);});
+  }else{
+    var fx=FILTROS.filter(function(x){return x.k===S.filtro;})[0];
+    if(fx)lista=lista.filter(fx.f);
   }
-  var q=semAcento(S.busca);
-  if(q)lista=lista.filter(function(o){return semAcento([o.numero,o.cliente].join(' ')).indexOf(q)>=0;});
   if(!lista.length){
-    var msg=S.carregando?'':S.filtro==='hoje'&&S.lista
-      ?'Nenhum pedido com data ou previsão de hoje.<br><button class="btn btn-g btn-sm" style="margin-top:10px;" onclick="filtrar(\'todos\')">Ver todos</button>'
-      :'Nenhum pedido encontrado.';
+    var msg=S.carregando?'':S.lista
+      ?({hoje:'Nenhuma entrega prevista para hoje.',amanha:'Nenhuma entrega prevista para amanhã.',proximos:'Nenhuma entrega nos próximos dias.',atrasados:'Nenhuma entrega atrasada.',feitas:'Nenhum pedido assinado ainda.'}[S.filtro]||'Nenhum pedido encontrado.')
+      :'';
     el.innerHTML=msg?'<div class="empty">'+msg+'</div>':'';return;
   }
-  el.innerHTML=lista.slice(0,300).map(function(o){
-    var prev=fmtData(o.dataPrevista),hoje=prev&&String(o.dataPrevista).slice(0,10)===hojeISO();
-    return'<div class="card os" onclick="abrirPedido('+o.id+')">'
+  var h='',ultimo=null,agrupa=S.filtro!=='feitas';
+  lista.forEach(function(o){
+    var d=prev(o);
+    if(agrupa&&d!==ultimo){ultimo=d;h+='<div class="sec" style="margin:14px 2px 8px;">'+(d?esc(rotuloDia(d)):'Sem data')+'</div>';}
+    h+='<div class="card os" onclick="abrirPedido('+o.id+')">'
       +'<div class="os-num">'+esc(o.numero||'s/ nº')+'</div>'
       +'<div class="os-main"><div class="t">'+esc(o.cliente||'Cliente')+'</div>'
-      +'<div class="s">'+(o.data?fmtData(o.data)+' · ':'')+(o.total?money(o.total):'')+'</div>'
+      +'<div class="s">'+(o.total?money(o.total):'')+(o.data?' · pedido de '+fmtData(o.data):'')+'</div>'
       +'<div class="badges">'
+      +(!agrupa&&d?'<span class="badge b-gray">Entrega '+fmtData(d)+'</span>':'')
+      +(ehAtrasado(o)?'<span class="badge b-red">Atrasado</span>':'')
       +(o.situacao?'<span class="badge b-blue">'+esc(o.situacao)+'</span>':'')
-      +(prev?'<span class="badge '+(hoje?'b-amber':'b-gray')+'">'+(hoje?'Entrega hoje':'Prev. '+prev)+'</span>':'')
       +(o._em?'<span class="badge b-gray">'+fmtDH(o._em)+'</span>':'')
       +statusReg(o.id)+'</div></div></div>';
-  }).join('');
+  });
+  el.innerHTML=h;
 }
 
 /* ═══ Pedido aberto ═════════════════════════════════════════════════════ */
@@ -332,13 +351,13 @@ function renderPedido(){
     +'<dt>Nome</dt><dd><b>'+esc(c.nome||'-')+'</b></dd>'
     +(c.documento?'<dt>CPF/CNPJ</dt><dd>'+esc(c.documento)+'</dd>':'')
     +(c.celular||c.telefone?'<dt>Telefone</dt><dd>'+[c.celular,c.telefone].filter(Boolean).map(function(t){return'<a href="tel:'+soDig(t)+'">'+esc(fmtFone(t))+'</a>';}).join(' · ')+'</dd>':'')
-    +(ende?'<dt>Entrega</dt><dd><a target="_blank" rel="noopener" href="https://www.google.com/maps/search/?api=1&query='+encodeURIComponent(ende)+'">'+esc(ende)+' ↗</a></dd>':'')
+    +(ende?'<dt>Endereço</dt><dd><a target="_blank" rel="noopener" href="https://www.google.com/maps/search/?api=1&query='+encodeURIComponent(ende)+'">'+esc(ende)+' ↗</a></dd>':'')
     +'</dl></div>';
 
   /* O pedido */
   h+='<div class="card"><div class="sec">Pedido</div><dl class="kv">'
     +(o.data?'<dt>Data</dt><dd>'+fmtData(o.data)+'</dd>':'')
-    +(o.dataPrevista?'<dt>Previsão</dt><dd>'+fmtData(o.dataPrevista)+'</dd>':'')
+    +(o.dataPrevista?'<dt>Entrega</dt><dd><b>'+fmtData(o.dataPrevista)+'</b></dd>':'')
     +(o.situacao?'<dt>Situação</dt><dd>'+esc(o.situacao)+'</dd>':'')
     +(o.vendedor?'<dt>Vendedor</dt><dd>'+esc(o.vendedor)+'</dd>':'')
     +(o.observacoes?'<dt>Observações</dt><dd>'+esc(o.observacoes)+'</dd>':'')
@@ -765,7 +784,7 @@ async function enviarWhats(){
 /* ═══ Início ═════════════════════════════════════════════════════════════ */
 (function(){
   if(initFirebase())listen();
-  try{var c=JSON.parse(lsGet('campo_lista')||'null');if(c&&c.lista)S.lista=c.lista;}catch(e){}
+  try{var c=JSON.parse(lsGet('campo_lista')||'null');if(c&&c.lista&&c.hoje){S.lista=c.lista;S.hoje=c.hoje;}}catch(e){}
   render();
   if(S.tecnico)carregarLista();
 })();
