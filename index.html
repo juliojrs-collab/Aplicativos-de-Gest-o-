@@ -908,7 +908,7 @@ async function salvarNovaOS(){
       var r=await fetch(API+'/api/bling/os',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
         chave:NV.chave,
         contato:cli.blingId?{id:cli.blingId}:{nome:cli.nome,telefone:cli.telefone,documento:cli.documento},
-        equipamento:aparelho(os),numeroSerie:os.nSerie,descricaoProblema:os.problema,dataPrevista:os.prazos.orcamento,
+        equipamento:[aparelho(os),os.cor].filter(Boolean).join(' '),numeroSerie:os.nSerie,descricaoProblema:os.problema,dataPrevista:os.prazos.orcamento,
         observacoes:[os.questionario,os.acessorios?'Acessórios: '+os.acessorios:'',os.condicao?'Condição: '+os.condicao:''].filter(Boolean).join('\n\n')
       })});
       var j=await r.json().catch(function(){return{};});
