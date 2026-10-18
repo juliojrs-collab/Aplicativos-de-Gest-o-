@@ -88,6 +88,13 @@ main{max-width:1100px;margin:0 auto;padding:16px 16px 96px;}
 .it-total{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;background:var(--blue-light);color:var(--blue-dark);border-radius:var(--r2);padding:10px 12px;margin:12px 0;font-size:13px;}
 .it-total b{font-size:16px;}
 .btn-del{background:#fff;color:var(--red);border:1px solid var(--red);}
+.sig-full{position:fixed;inset:0;z-index:80;background:var(--surface);display:flex;flex-direction:column;padding:12px 14px calc(12px + env(safe-area-inset-bottom));overscroll-behavior:none;touch-action:none;}
+.sig-top{display:flex;justify-content:space-between;align-items:flex-start;gap:8px;margin-bottom:8px;}
+.sig-termo{font-size:12px;color:var(--text2);background:var(--blue-light);border-radius:var(--r2);padding:8px 10px;margin-bottom:10px;}
+.sig-grande{flex:1;height:auto;min-height:180px;}
+.sig-bar{display:flex;gap:8px;margin-top:10px;}
+.sig-bar .btn{flex:1;}
+.sig-bar #sig-ok{flex:2;}
 .sig-wrap{position:relative;border:2px dashed var(--border2);border-radius:var(--r2);background:#fff;height:170px;touch-action:none;}
 .sig-wrap canvas{width:100%;height:100%;display:block;touch-action:none;cursor:crosshair;}
 .sig-ph{position:absolute;left:0;right:0;top:50%;transform:translateY(-50%);text-align:center;color:var(--text3);pointer-events:none;font-size:14px;}
@@ -537,44 +544,81 @@ function registrarAvaliacao(id){
   });
 }
 var SIG=null;
-function assinHtml(){
-  return'<div class="info" style="font-size:12px;">'+esc(TERMO_ENTRADA)+'</div>'
-    +'<div class="sig-wrap"><canvas id="sig-cv"></canvas><span class="sig-ph" id="sig-ph">Cliente assina aqui com o dedo</span></div>'
-    +'<div style="display:flex;justify-content:space-between;align-items:center;margin:6px 0 12px;"><span class="hint" style="margin:0">A assinatura fica salva na OS e no relatório.</span>'
-    +'<button type="button" class="btn btn-g btn-sm" onclick="limparAssin()">Limpar</button></div>';
+/* A assinatura abre numa tela cheia própria, por cima de tudo, com a página
+   travada atrás: no formulário, o dedo do cliente rolava a tela em vez de
+   desenhar. onOk recebe a assinatura pronta. */
+function abrirTelaAssin(sub,onOk){
+  var ov=document.createElement('div');ov.className='sig-full';ov.id='sig-full';
+  ov.innerHTML='<div class="sig-top"><div><b>Assinatura do cliente</b>'+(sub?'<div class="sub">'+esc(sub)+'</div>':'')+'</div>'
+    +'<button class="mdl-x" onclick="fecharTelaAssin()">✕</button></div>'
+    +'<div class="sig-termo">'+esc(TERMO_ENTRADA)+'</div>'
+    +'<div class="sig-wrap sig-grande"><canvas id="sig-cv"></canvas><span class="sig-ph" id="sig-ph">Assine aqui com o dedo</span></div>'
+    +'<div class="sig-bar"><button class="btn btn-g" onclick="limparAssin()">Limpar</button>'
+    +'<button class="btn btn-g" onclick="fecharTelaAssin()">Cancelar</button>'
+    +'<button class="btn btn-ok" id="sig-ok">✔ Confirmar assinatura</button></div>';
+  /* Nada dentro da tela rola: bloqueia o arrasto do navegador. */
+  ov.addEventListener('touchmove',function(e){e.preventDefault();},{passive:false});
+  document.body.appendChild(ov);
+  document.documentElement.style.overflow='hidden';document.body.style.overflow='hidden';
+  initAssin();
+  $('sig-ok').onclick=function(){
+    var a=lerAssin();if(!a){toast('Peça para o cliente assinar no quadro.');return;}
+    fecharTelaAssin();onOk(a);
+  };
+}
+function fecharTelaAssin(){
+  var ov=$('sig-full');if(ov)ov.remove();SIG=null;
+  document.documentElement.style.overflow='';
+  if(!$('modal').innerHTML)document.body.style.overflow='';
 }
 function initAssin(){
   var cv=$('sig-cv');if(!cv)return;
   var r=cv.getBoundingClientRect(),dpr=window.devicePixelRatio||1;
   cv.width=Math.round(r.width*dpr);cv.height=Math.round(r.height*dpr);
   var ctx=cv.getContext('2d');ctx.scale(dpr,dpr);
-  ctx.lineWidth=2.4;ctx.lineCap='round';ctx.lineJoin='round';ctx.strokeStyle='#111827';
-  SIG={cv:cv,ctx:ctx,vazio:true,des:false};
+  ctx.lineWidth=2.6;ctx.lineCap='round';ctx.lineJoin='round';ctx.strokeStyle='#111827';
+  SIG={cv:cv,ctx:ctx,vazio:true,des:false,dpr:dpr,x0:1e9,y0:1e9,x1:-1e9,y1:-1e9};
+  function marca(p){SIG.x0=Math.min(SIG.x0,p.x);SIG.y0=Math.min(SIG.y0,p.y);SIG.x1=Math.max(SIG.x1,p.x);SIG.y1=Math.max(SIG.y1,p.y);}
   function pt(e){var b=cv.getBoundingClientRect();return{x:e.clientX-b.left,y:e.clientY-b.top};}
-  cv.onpointerdown=function(e){e.preventDefault();cv.setPointerCapture(e.pointerId);SIG.des=true;var p=pt(e);ctx.beginPath();ctx.moveTo(p.x,p.y);ctx.lineTo(p.x+0.1,p.y+0.1);ctx.stroke();
+  cv.onpointerdown=function(e){e.preventDefault();cv.setPointerCapture(e.pointerId);SIG.des=true;var p=pt(e);ctx.beginPath();ctx.moveTo(p.x,p.y);ctx.lineTo(p.x+0.1,p.y+0.1);ctx.stroke();marca(p);
     if(SIG.vazio){SIG.vazio=false;var ph=$('sig-ph');if(ph)ph.style.display='none';}};
-  cv.onpointermove=function(e){if(!SIG.des)return;e.preventDefault();var p=pt(e);ctx.lineTo(p.x,p.y);ctx.stroke();};
+  cv.onpointermove=function(e){if(!SIG.des)return;e.preventDefault();var p=pt(e);ctx.lineTo(p.x,p.y);ctx.stroke();marca(p);};
   cv.onpointerup=cv.onpointercancel=function(){SIG.des=false;};
 }
 function limparAssin(){
   if(!SIG)return;
   SIG.ctx.clearRect(0,0,SIG.cv.width,SIG.cv.height);SIG.vazio=true;
+  SIG.x0=SIG.y0=1e9;SIG.x1=SIG.y1=-1e9;
   var ph=$('sig-ph');if(ph)ph.style.display='';
 }
-/* PNG reduzido a 600px de largura: legível no PDF e leve no Firestore. */
+/* Recorta só a área desenhada (a tela é alta no celular em pé) e reduz para
+   no máximo 600px: legível no PDF e leve no Firestore. */
 function lerAssin(){
   if(!SIG||SIG.vazio)return null;
-  var W=600,H=Math.round(SIG.cv.height*W/SIG.cv.width),c=document.createElement('canvas');
-  c.width=W;c.height=H;c.getContext('2d').drawImage(SIG.cv,0,0,W,H);
+  var d=SIG.dpr,m=12,sx=Math.max(0,(SIG.x0-m)*d),sy=Math.max(0,(SIG.y0-m)*d);
+  var sw=Math.min(SIG.cv.width-sx,(SIG.x1-SIG.x0+2*m)*d),sh=Math.min(SIG.cv.height-sy,(SIG.y1-SIG.y0+2*m)*d);
+  var k=Math.min(1,600/sw),W=Math.max(1,Math.round(sw*k)),H=Math.max(1,Math.round(sh*k)),c=document.createElement('canvas');
+  c.width=W;c.height=H;c.getContext('2d').drawImage(SIG.cv,sx,sy,sw,sh,0,0,W,H);
   return{img:c.toDataURL('image/png'),w:W,h:H,em:Date.now(),termo:TERMO_ENTRADA};
+}
+/* No formulário de recebimento: só o botão e, depois de assinar, a prévia. */
+function assinHtml(){return'<div id="nv-assin"></div>';}
+function renderAssinNV(){
+  var el=$('nv-assin');if(!el)return;
+  el.innerHTML=NV.assin
+    ?'<div class="sig-img"><img src="'+NV.assin.img+'"/></div><div style="display:flex;gap:8px;align-items:center;margin:6px 0 12px;"><span class="badge b-green">Assinado</span>'
+      +'<button type="button" class="btn btn-g btn-sm" onclick="assinarNV()">Assinar de novo</button></div>'
+    :'<button type="button" class="btn btn-p btn-lg" style="margin-bottom:12px;" onclick="assinarNV()">✍️ Cliente assinar</button>';
+}
+function assinarNV(){
+  abrirTelaAssin(val('nv-nome')||(NV.contato&&NV.contato.nome)||'',function(a){NV.assin=a;renderAssinNV();});
 }
 function colherAssinatura(id){
   var o=getOS(id);
-  passoSimples('Assinatura do cliente','<div class="sub" style="margin-bottom:8px;">'+esc(osLabel(o))+' · '+esc(o.cliente&&o.cliente.nome||'')+' · '+esc(aparelho(o))+'</div>'+assinHtml(),'Salvar assinatura',async function(){
-    var a=lerAssin();if(!a){psErro('Peça para o cliente assinar no quadro.');return false;}
-    await avancar(id,{assinatura:a},'Assinatura salva');
+  abrirTelaAssin(osLabel(o)+' · '+(o.cliente&&o.cliente.nome||'')+' · '+aparelho(o),async function(a){
+    try{await avancar(id,{assinatura:a},'Assinatura salva');}catch(e){return;}
+    if(S.abertaId===id)abrirOS(id);
   });
-  initAssin();
 }
 
 /* ═══ Recepção: nova OS ══════════════════════════════════════════════════ */
@@ -607,7 +651,7 @@ function novaOS(){
     +'<div id="nv-num"></div>'
     +'<div id="nv-err"></div>'
     +'<button class="btn btn-p btn-lg" id="nv-ok" onclick="salvarNovaOS()">Registrar entrada</button>');
-  renderCliente();renderNumero();renderMidiaForm();initAssin();
+  renderCliente();renderNumero();renderMidiaForm();renderAssinNV();
 }
 function lerLocal(k){try{return localStorage.getItem('oficina_'+k)||'';}catch(e){return'';}}
 function gravarLocal(k,v){try{localStorage.setItem('oficina_'+k,v);}catch(e){}}
@@ -673,7 +717,7 @@ async function salvarNovaOS(){
   if(!F.fotos.length)falta.push('pelo menos 1 foto de entrada');
   if(NV.manual&&!val('nv-numero'))falta.push('nº da OS');
   if(falta.length){nvErro('Falta preencher: '+falta.join(', ')+'.');return;}
-  var assin=lerAssin();
+  var assin=NV.assin||null;
   if(!assin&&!confirm('O cliente não assinou. Registrar a entrada sem assinatura?\n(Dá para colher a assinatura depois, na OS.)'))return;
   if(assin)os.assinatura=assin;
   var pagou=$('nv-aval')&&$('nv-aval').checked;
@@ -1359,6 +1403,32 @@ function baixarRel(){
   document.body.appendChild(a);a.click();a.remove();setTimeout(function(){URL.revokeObjectURL(a.href);},5000);
 }
 function abrirRel(){if(_rel)window.open(URL.createObjectURL(_rel.blob),'_blank');}
+/* Rubrica da loja: um "J" manuscrito, desenhado em traço de caneta e
+   impresso sempre na assinatura da Purific. Gerado uma vez e reaproveitado. */
+var _rubrica=null;
+function rubricaLoja(){
+  if(_rubrica)return _rubrica;
+  try{
+    var W=360,H=200,c=document.createElement('canvas');c.width=W;c.height=H;
+    var x=c.getContext('2d');
+    x.strokeStyle='#1e3a8a';x.lineCap='round';x.lineJoin='round';
+    /* Entrada pela esquerda, laço no topo, haste inclinada, laço embaixo
+       e o traço final saindo para a direita, como num J escrito à mão. */
+    x.lineWidth=6;
+    x.beginPath();
+    x.moveTo(60,70);
+    x.bezierCurveTo(110,30,220,14,268,26);
+    x.bezierCurveTo(300,34,288,58,256,54);
+    x.bezierCurveTo(232,50,236,30,250,28);
+    x.bezierCurveTo(250,70,228,128,192,160);
+    x.bezierCurveTo(166,182,118,184,104,162);
+    x.bezierCurveTo(92,142,126,128,166,138);
+    x.bezierCurveTo(222,150,284,140,334,112);
+    x.stroke();
+    _rubrica={img:c.toDataURL('image/png'),w:W,h:H};
+  }catch(e){_rubrica=null;}
+  return _rubrica;
+}
 function montarPdfEntrada(o,fotos){
   var doc=new window.jspdf.jsPDF();
   var ML=14,MR=196,az=PURIFIC.azul,c=o.cliente||{};
@@ -1429,19 +1499,22 @@ function montarPdfEntrada(o,fotos){
     doc.setFont('helvetica','normal');doc.text(ld,ML+2,y);y+=ld.length*4.5+1;
   }
   /* Assinaturas: cliente e loja */
-  if(y+40>272)y=pdfNovaPagina(doc);
+  if(y+48>272)y=pdfNovaPagina(doc);
   y+=8;
-  doc.setDrawColor(215,222,226);doc.setLineWidth(0.3);doc.roundedRect(ML,y,MR-ML,32,2,2,'S');
-  doc.setFontSize(7.5);doc.setTextColor(110,110,110);doc.text('Sorocaba/SP, '+dataExtenso(new Date(o.tempos&&o.tempos.recebido||Date.now())),ML+6,y+7);
-  var cx1=ML+(MR-ML)/4,cx2=ML+3*(MR-ML)/4;
-  if(o.assinatura&&o.assinatura.img){
-    try{var sh=15,sw=Math.min(70,sh*(o.assinatura.w||600)/Math.max(1,o.assinatura.h||200));doc.addImage(o.assinatura.img,'PNG',cx1-sw/2,y+4.5,sw,sh);}catch(e){}
+  doc.setDrawColor(215,222,226);doc.setLineWidth(0.3);doc.roundedRect(ML,y,MR-ML,40,2,2,'S');
+  doc.setFontSize(7.5);doc.setTextColor(110,110,110);doc.text('Sorocaba/SP, '+dataExtenso(new Date(o.tempos&&o.tempos.recebido||Date.now())),ML+6,y+6);
+  var cx1=ML+(MR-ML)/4,cx2=ML+3*(MR-ML)/4,base=y+28;
+  /* Imagem que cabe em larg×alt mm, mantendo a proporção, apoiada na linha. */
+  function assinaNaLinha(img,w,h,cx,larg,alt){
+    try{var ar=w/Math.max(1,h),sw=Math.min(larg,alt*ar),sh=sw/ar;doc.addImage(img,'PNG',cx-sw/2,base-0.5-sh,sw,sh);}catch(e){}
   }
-  doc.setDrawColor(70,70,70);doc.setLineWidth(0.35);doc.line(cx1-36,y+20,cx1+36,y+20);doc.line(cx2-36,y+20,cx2+36,y+20);
+  if(o.assinatura&&o.assinatura.img)assinaNaLinha(o.assinatura.img,o.assinatura.w||600,o.assinatura.h||200,cx1,70,18);
+  var rub=rubricaLoja();if(rub)assinaNaLinha(rub.img,rub.w,rub.h,cx2,40,16);
+  doc.setDrawColor(70,70,70);doc.setLineWidth(0.35);doc.line(cx1-36,base,cx1+36,base);doc.line(cx2-36,base,cx2+36,base);
   doc.setFont('helvetica','bold');doc.setFontSize(8.5);doc.setTextColor(az[0],az[1],az[2]);
-  doc.text(c.nome||'Cliente',cx1,y+25,{align:'center'});doc.text(PURIFIC.nome,cx2,y+25,{align:'center'});
+  doc.text(c.nome||'Cliente',cx1,base+5,{align:'center'});doc.text(PURIFIC.nome,cx2,base+5,{align:'center'});
   doc.setFont('helvetica','normal');doc.setFontSize(6.5);doc.setTextColor(140,140,140);
-  doc.text(o.assinatura?'Cliente · assinado em '+fmtDH(o.assinatura.em):'Cliente',cx1,y+29,{align:'center'});doc.text('Atendente: '+(o.atendente||'-'),cx2,y+29,{align:'center'});
+  doc.text(o.assinatura?'Cliente · assinado em '+fmtDH(o.assinatura.em):'Cliente',cx1,base+9,{align:'center'});doc.text('Atendente: '+(o.atendente||'-'),cx2,base+9,{align:'center'});
   doc.setTextColor(30,30,30);
   pdfRodape(doc,new Date().toLocaleDateString('pt-BR'));
   return doc;
