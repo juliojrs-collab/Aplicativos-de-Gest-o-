@@ -510,7 +510,10 @@ function fecharModal(){
 /* ═══ Assinatura do cliente ══════════════════════════════════════════════
    Quadro de desenho com o dedo (ou caneta/mouse). Sai como PNG pequeno,
    guardado na própria OS e impresso no relatório de entrada. */
-var TERMO_ENTRADA='Declaro que entreguei o aparelho descrito acima nas condições registradas (fotos e respostas) e autorizo a Purific a avaliá-lo. O orçamento será enviado para minha aprovação antes de qualquer serviço.';
+/* Valor da avaliação técnica: entra no termo que o cliente assina, no aviso
+   da recepção e no relatório de entrada. */
+var VALOR_AVALIACAO=80;
+var TERMO_ENTRADA='Declaro que entreguei o aparelho descrito acima nas condições registradas (fotos e respostas) e autorizo a Purific a avaliá-lo. Estou ciente de que a avaliação técnica tem o valor de '+money(VALOR_AVALIACAO)+'. O orçamento será enviado para minha aprovação antes de qualquer serviço.';
 var SIG=null;
 function assinHtml(){
   return'<div class="info" style="font-size:12px;">'+esc(TERMO_ENTRADA)+'</div>'
@@ -574,7 +577,8 @@ function novaOS(){
     +'<div class="field"><label>Atendente</label><input id="nv-atend" value="'+esc(lerLocal('atendente'))+'"/></div>'
     +'<div class="sec">Como o aparelho chegou</div>'
     +midiaFormHtml('Fotos de entrada (até 6)',false,true)
-    +'<div class="sec">Assinatura do cliente</div>'+assinHtml()
+    +'<div class="sec">Assinatura do cliente</div>'
+    +'<div class="info"><b>Avaliação técnica: '+money(VALOR_AVALIACAO)+'</b> — informe o cliente antes de ele assinar.</div>'+assinHtml()
     +'<div class="sec">Número da OS</div>'
     +'<div id="nv-num"></div>'
     +'<div id="nv-err"></div>'
@@ -1383,6 +1387,7 @@ function montarPdfEntrada(o,fotos){
   }
   section('Próximos passos');
   var termo=['Seu purificador será avaliado pela nossa equipe técnica.',
+    'A avaliação técnica tem o valor de '+money(VALOR_AVALIACAO)+'.',
     'Antes de qualquer serviço, entraremos em contato com o orçamento para sua aprovação.',
     'Guarde este comprovante: o número da OS identifica o seu aparelho na loja.'];
   doc.setFont('helvetica','normal');
