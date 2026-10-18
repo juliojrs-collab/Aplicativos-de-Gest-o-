@@ -705,9 +705,11 @@ function detalheHtml(o,midias){
         :'<dt>Preço</dt><dd><span class="badge b-orange">Aguardando o comercial</span></dd>')
       +(o.obsResposta?'<dt>Obs. do cliente</dt><dd>'+esc(o.obsResposta)+'</dd>':'')
       +((q.historico||[]).length?'<dt>Alterações</dt><dd>'+q.historico.map(function(x){return fmtDH(x.em)+': '+money(x.de)+' → '+money(x.para);}).join('\n')+'</dd>'
-        :q.editadoEm?'<dt>Editado em</dt><dd>'+fmtDH(q.editadoEm)+'</dd>':'')
+        :q.editadoEm?'<dt>Preço editado em</dt><dd>'+fmtDH(q.editadoEm)+'</dd>':'')
+      +(q.diagEditadoEm?'<dt>Diagnóstico editado</dt><dd>'+fmtDH(q.diagEditadoEm)+'</dd>':'')
       +'</dl><div class="sec">Fotos do problema</div>'+(midias?galeria(midias,'problema'):'<div class="sub">Carregando…</div>')
-      +'<div style="text-align:right;margin-top:10px;"><button class="btn btn-g btn-sm" onclick="editarOrc(\''+o.id+'\')">✏️ Editar orçamento</button></div></div>';
+      +'<div style="display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap;margin-top:10px;"><button class="btn btn-g btn-sm" onclick="editarDiag(\''+o.id+'\')">✏️ Editar diagnóstico</button>'
+      +(o.tempos.precificado?'<button class="btn btn-g btn-sm" onclick="editarOrc(\''+o.id+'\')">💲 Editar preço</button>':'')+'</div></div>';
   }
   if(o.servico){
     h+='<div class="card"><h3>Serviço</h3><dl class="kv">'
@@ -928,40 +930,48 @@ function finalizarOrc(id){
 /* Corrige o orçamento sem mexer na etapa nem nos horários medidos. Cada
    alteração guarda o valor anterior, para ficar claro se o preço mudou depois
    que o cliente já tinha respondido. */
-function editarOrc(id){
+/* Parte do técnico: diagnóstico, serviços e peças necessárias (+ fotos).
+   Não mexe em preço nem no Bling. */
+function editarDiag(id){
   var o=getOS(id);
   resetMidiaForm('problema',6,1);
-  var aviso=o.aprovado===true?'<div class="info">O cliente já aprovou este orçamento. Se o valor mudar, confirme com ele de novo.</div>'
-    :o.aprovado===false?'<div class="info">O cliente não aprovou este orçamento.</div>':'';
-  passoSimples('Editar orçamento',
-    aviso+orcFormHtml(o)
-    +(o.tempos.precificado?'<div class="sec">Preço (comercial)</div>'+precoFormHtml(o):'')
-    +midiaFormHtml('Adicionar fotos do problema (opcional)',true,false),
-    'Salvar alterações',async function(){
+  passoSimples('Editar diagnóstico',
+    orcFormHtml(o)+midiaFormHtml('Adicionar fotos do problema (opcional)',true,false),
+    'Salvar diagnóstico',async function(){
       var tec=val('ps-tec'),diag=val('ps-diag');
       if(!tec){psErro('Escolha o técnico.');return false;}
       if(!diag){psErro('Escreva o diagnóstico.');return false;}
       if(F.enviandoVideo){psErro('Espere o vídeo terminar de enviar.');return false;}
-      var ant=o.orcamento||{},comPreco=!!o.tempos.precificado,r=null;
-      if(comPreco){r=await salvarItens(o);if(!r)return false;}
-      var novas=F.fotos.length+F.videos.length,upd={tecnicoOrc:tec};
-      if(comPreco)upd.comercial=r.comercial;
+      var upd={tecnicoOrc:tec,'orcamento.diagnostico':diag,'orcamento.servicos':val('ps-serv'),'orcamento.pecas':val('ps-pecas'),'orcamento.diagEditadoEm':Date.now()};
+      var novas=F.fotos.length+F.videos.length;
       if(novas){
         $('ps-ok').textContent='Salvando fotos…';
         try{await salvarMidias(id,'problema',F.fotos,F.videos);}
-        catch(e){psErro('Erro ao salvar as fotos: '+e.message);$('ps-ok').textContent='Salvar alterações';throw e;}
+        catch(e){psErro('Erro ao salvar as fotos: '+e.message);$('ps-ok').textContent='Salvar diagnóstico';throw e;}
         var nm=(o.midias||{});nm.problema=(nm.problema||0)+novas;upd.midias=nm;
         F.fotos=[];F.videos=[];
       }
-      var hist=(ant.historico||[]).slice();
-      upd.orcamento={diagnostico:diag,servicos:val('ps-serv'),pecas:val('ps-pecas'),historico:hist,editadoEm:Date.now()};
-      if(comPreco){
-        if(Math.abs((ant.total||0)-r.total)>0.001)hist.push({em:Date.now(),de:ant.total||0,para:r.total});
-        ['itens','valorPecas','maoObra','total','blingLancadoEm','blingErro'].forEach(function(k){upd.orcamento[k]=r[k];});
-      }
-      await avancar(id,upd,'Orçamento atualizado');
+      gravarLocal('tecnico',tec);
+      await avancar(id,upd,'Diagnóstico atualizado');
     });
-  renderMidiaForm();if(o.tempos.precificado)renderItens();
+  renderMidiaForm();
+}
+/* Parte do comercial: itens e preços, relançados no Bling. Cada mudança de
+   valor fica no histórico, para saber se o preço mudou depois da resposta do
+   cliente. */
+function editarOrc(id){
+  var o=getOS(id);
+  var aviso=o.aprovado===true?'<div class="info">O cliente já aprovou este orçamento. Se o valor mudar, confirme com ele de novo.</div>'
+    :o.aprovado===false?'<div class="info">O cliente não aprovou este orçamento.</div>':'';
+  passoSimples('Editar preço',aviso+resumoTecnico(o)+precoFormHtml(o),'Salvar preço',async function(){
+    var ant=o.orcamento||{},r=await salvarItens(o);if(!r)return false;
+    var hist=(ant.historico||[]).slice();
+    if(Math.abs((ant.total||0)-r.total)>0.001)hist.push({em:Date.now(),de:ant.total||0,para:r.total});
+    var upd={comercial:r.comercial,'orcamento.historico':hist,'orcamento.editadoEm':Date.now()};
+    ['itens','valorPecas','maoObra','total','blingLancadoEm','blingErro'].forEach(function(k){upd['orcamento.'+k]=r[k];});
+    await avancar(id,upd,r.blingLancadoEm?'Preço atualizado e relançado no Bling':'Preço atualizado');
+  });
+  renderItens();
 }
 function respostaCliente(id,aprovou){
   passoSimples(aprovou?'Cliente aprovou o orçamento':'Cliente não aprovou',
