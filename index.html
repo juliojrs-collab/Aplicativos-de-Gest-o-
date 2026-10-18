@@ -256,7 +256,8 @@ var TRECHOS=[
   {k:'esperaOrc', l:'Espera p/ orçamento', de:'recebido', ate:'orcIni'},
   {k:'orcamento', l:'Fazendo orçamento',   de:'orcIni',   ate:'orcFim'},
   {k:'preco',     l:'Precificação (comercial)', de:'orcFim', ate:'precificado'},
-  {k:'cliente',   l:'Resposta do cliente', de:'precificado', ate:'resposta'},
+  {k:'informar',  l:'Passar orçamento ao cliente', de:'precificado', ate:'informado'},
+  {k:'cliente',   l:'Resposta do cliente', de:'informado', ate:'resposta'},
   {k:'esperaServ',l:'Espera p/ serviço',   de:'resposta', ate:'servIni', soAprovado:true},
   {k:'execucao',  l:'Execução do serviço', de:'servIni',  ate:'servFim'},
   {k:'retirada',  l:'Aguardando retirada', de:'servFim',  ate:'entregue'},
@@ -485,7 +486,8 @@ var ETAPAS_PRAZO_ORC=['recebido','em_orcamento','aguardando_preco'],ETAPAS_PRAZO
 /* O prazo que está valendo agora, conforme a etapa. */
 function prazoAtual(o){
   var pz=o.prazos||{};
-  if(ETAPAS_PRAZO_ORC.indexOf(o.etapa)>=0)return{l:'Orçamento',data:pz.orcamento};
+  /* O prazo do orçamento só termina quando o cliente é informado. */
+  if(ETAPAS_PRAZO_ORC.indexOf(o.etapa)>=0||(o.etapa==='aguardando_aprovacao'&&!(o.tempos||{}).informado))return{l:'Orçamento',data:pz.orcamento};
   if(ETAPAS_PRAZO_SERV.indexOf(o.etapa)>=0)return{l:'Finalização',data:pz.entrega};
   return null;
 }
@@ -499,7 +501,9 @@ function prazoBadge(o){
   return'<span class="badge '+(d<0?'b-red':d===0?'b-amber':'b-gray')+'">'+p.l+' '+fmtData(p.data).slice(0,5)+' · '+textoPrazo(p.data)+'</span>';
 }
 /* Quando cada prazo foi cumprido de fato. */
-function entregaOrc(o){var t=o.tempos||{};return t.precificado||t.resposta||null;}
+/* O orçamento conta como entregue quando o cliente foi informado. OS antigas,
+   sem esse registro, usam a resposta do cliente. */
+function entregaOrc(o){var t=o.tempos||{};return t.informado||t.resposta||null;}
 function situacaoPrazo(iso,feitoEm){
   if(!iso)return'<span class="sub">sem prazo definido</span>';
   if(feitoEm)return feitoEm<=fimDoDia(iso)?'<span class="badge b-green">cumprido · '+fmtDH(feitoEm)+'</span>':'<span class="badge b-red">entregue com atraso · '+fmtDH(feitoEm)+'</span>';
@@ -858,8 +862,11 @@ function detalheHtml(o,midias){
     {k:'recebido',l:'Entrada na loja',quem:o.atendente},
     {k:'orcIni',l:'Orçamento iniciado',quem:o.tecnicoOrc,dur:d.esperaOrc,durL:'espera'},
     {k:'orcFim',l:'Orçamento técnico finalizado',quem:o.tecnicoOrc,dur:d.orcamento,durL:'orçamento'},
+    {k:'informado',l:'Orçamento passado ao cliente',quem:o.informadoPor,dur:d.informar,durL:'até informar o cliente'},
     {k:'resposta',l:o.aprovado===false?'Cliente NÃO aprovou':'Cliente aprovou',dur:d.cliente,durL:'resposta do cliente'}
   ];
+  /* OS antigas não registraram quando o cliente foi informado. */
+  if(!t.informado&&t.resposta)passos.splice(3,1);
   /* OS abertas antes da etapa de preço pularam este passo. */
   if(t.precificado||!t.resposta)passos.splice(3,0,{k:'precificado',l:'Preço definido pelo comercial',quem:o.comercial,dur:d.preco,durL:'precificação'});
   if(o.aprovado!==false)passos.push(
@@ -936,8 +943,9 @@ function acoesHtml(o){
     case'em_orcamento':b='<button class="btn btn-p btn-lg" onclick="finalizarOrc(\''+id+'\')">📋 Finalizar orçamento</button>';break;
     case'aguardando_preco':b='<div class="info">A oficina terminou o orçamento técnico. O comercial coloca o preço e depois passa ao cliente.</div>'
       +'<button class="btn btn-p btn-lg" onclick="precificar(\''+id+'\')">💲 Colocar preço</button>';break;
-    case'aguardando_aprovacao':b='<div class="info">Ligue para o cliente e registre a resposta.<br>'+contaCliente(o)
+    case'aguardando_aprovacao':b='<div class="info">'+(o.tempos.informado?'Cliente informado em '+fmtDH(o.tempos.informado)+'. Aguardando a resposta.':'Passe o orçamento ao cliente e registre.')+'<br>'+contaCliente(o)
       +(o.prazos&&o.prazos.entrega?'<br>Previsão de término: <b>'+fmtData(o.prazos.entrega)+'</b>':'')+'</div>'
+      +(o.tempos.informado?'':'<button class="btn btn-p btn-lg" style="margin-bottom:8px;" onclick="clienteInformado(\''+id+'\')">📞 Orçamento passado ao cliente</button>')
       +'<div class="actions"><button class="btn btn-ok" onclick="respostaCliente(\''+id+'\',true)">✔ Cliente aprovou</button>'
       +'<button class="btn btn-no" onclick="respostaCliente(\''+id+'\',false)">✖ Cliente não aprovou</button></div>';break;
     case'aprovado':b='<button class="btn btn-p btn-lg" onclick="iniciarServ(\''+id+'\')">🛠 Iniciar serviço</button>';break;
@@ -1186,6 +1194,15 @@ function editarOrc(id){
   });
   renderItens();
 }
+function clienteInformado(id){
+  passoSimples('Orçamento passado ao cliente',
+    '<div class="field"><label>Quem informou <span class="req">*</span></label><input id="ps-quem" value="'+esc(lerLocal('comercial')||lerLocal('atendente'))+'"/></div>'
+    +'<div class="field"><label>Como</label><select id="ps-como"><option>WhatsApp</option><option>Ligação</option><option>Pessoalmente</option><option>Outro</option></select></div>',
+    'Registrar agora',async function(){
+      var q=val('ps-quem');if(!q){psErro('Informe quem passou o orçamento.');return false;}
+      await avancar(id,{'tempos.informado':Date.now(),informadoPor:q,informadoComo:val('ps-como')},'Registrado — aguardando resposta do cliente');
+    });
+}
 function respostaCliente(id,aprovou){
   passoSimples(aprovou?'Cliente aprovou o orçamento':'Cliente não aprovou',
     (aprovou?((getOS(id).prazos||{}).entrega
@@ -1193,7 +1210,9 @@ function respostaCliente(id,aprovou){
       :'<div class="field"><label>Previsão de término (o comercial não definiu) <span class="req">*</span></label><input type="date" id="ps-prazo" value="'+maisDias(3)+'"/></div>'):'')
     +'<div class="field"><label>Observação (opcional)</label><textarea id="ps-obs" rows="2" placeholder="'+(aprovou?'Ex: pediu urgência':'Ex: achou caro, vai comprar um novo')+'"></textarea></div>',
     'Confirmar',async function(){
-      var upd={etapa:aprovou?'aprovado':'devolver','tempos.resposta':Date.now(),aprovado:aprovou,obsResposta:val('ps-obs')};
+      var agora=Date.now(),upd={etapa:aprovou?'aprovado':'devolver','tempos.resposta':agora,aprovado:aprovou,obsResposta:val('ps-obs')};
+      /* Respondeu na mesma conversa em que foi informado. */
+      if(!getOS(id).tempos.informado)upd['tempos.informado']=agora;
       if(aprovou&&$('ps-prazo')){var pz=val('ps-prazo');if(!pz){psErro('Informe a previsão de término.');return false;}upd['prazos.entrega']=pz;}
       await avancar(id,upd,
         aprovou?'Aprovado — vai para a fila da oficina':'Registrado — devolver ao cliente');
@@ -1267,8 +1286,8 @@ function apagarOS(id){
     });
   $('ps-ok').className='btn btn-no';
 }
-var NOMES_T={recebido:'Entrada na loja',orcIni:'Início do orçamento',orcFim:'Fim do orçamento',precificado:'Preço do comercial',resposta:'Resposta do cliente',servIni:'Início do serviço',servFim:'Fim do serviço',entregue:'Entrega'};
-var ORDEM_T=['recebido','orcIni','orcFim','precificado','resposta','servIni','servFim','entregue'];
+var NOMES_T={recebido:'Entrada na loja',orcIni:'Início do orçamento',orcFim:'Fim do orçamento',precificado:'Preço do comercial',informado:'Orçamento passado ao cliente',resposta:'Resposta do cliente',servIni:'Início do serviço',servFim:'Fim do serviço',entregue:'Entrega'};
+var ORDEM_T=['recebido','orcIni','orcFim','precificado','informado','resposta','servIni','servFim','entregue'];
 function ajustarHora(id,k){
   var o=getOS(id);
   passoSimples('Ajustar horário','<div class="field"><label>'+esc(NOMES_T[k])+'</label><input type="datetime-local" id="ps-dh" value="'+toLocalInput(o.tempos[k])+'"/></div>'
