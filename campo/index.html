@@ -175,7 +175,7 @@ function val(id){var e=$(id);return e?String(e.value||'').trim():'';}
 function toast(m){var t=document.createElement('div');t.className='toast';t.textContent=m;document.body.appendChild(t);setTimeout(function(){t.remove();},3200);}
 function pad(n){return n<10?'0'+n:''+n;}
 function fmtDH(ms){if(!ms)return'-';var d=new Date(ms);return pad(d.getDate())+'/'+pad(d.getMonth()+1)+'/'+d.getFullYear()+' '+pad(d.getHours())+':'+pad(d.getMinutes());}
-function fmtData(iso){if(!iso)return'';var p=String(iso).slice(0,10).split('-');return p.length===3?p[2]+'/'+p[1]+'/'+p[0]:iso;}
+function fmtData(iso){if(!iso||String(iso).indexOf('0000')===0)return'';var p=String(iso).slice(0,10).split('-');return p.length===3?p[2]+'/'+p[1]+'/'+p[0]:iso;}
 function money(v){return'R$ '+(Number(v)||0).toFixed(2).replace('.',',').replace(/\B(?=(\d{3})+(?!\d))/g,'.');}
 function semAcento(s){return String(s||'').normalize('NFD').replace(/[̀-ͯ]/g,'').toLowerCase().trim();}
 function soDig(s){return String(s||'').replace(/\D/g,'');}
@@ -270,14 +270,14 @@ function desenharItens(){
     el.innerHTML=msg?'<div class="empty">'+msg+'</div>':'';return;
   }
   el.innerHTML=lista.map(function(o){
-    var hoje=o.dataPrevista&&String(o.dataPrevista).slice(0,10)===hojeISO();
+    var hoje=fmtData(o.dataPrevista)&&String(o.dataPrevista).slice(0,10)===hojeISO();
     return'<div class="card os" onclick="abrirOS('+o.id+')">'
       +'<div class="os-num">'+esc(o.numero||'s/ nº')+'</div>'
       +'<div class="os-main"><div class="t">'+esc(o.cliente||'Cliente')+'</div>'
       +'<div class="s">'+esc(o.equipamento||o.problema||'—')+'</div>'
       +'<div class="badges">'
       +(o.situacao?'<span class="badge b-blue">'+esc(o.situacao)+'</span>':'')
-      +(o.dataPrevista?'<span class="badge '+(hoje?'b-amber':'b-gray')+'">'+(hoje?'Hoje':'Prev. '+fmtData(o.dataPrevista))+'</span>':'')
+      +(fmtData(o.dataPrevista)?'<span class="badge '+(hoje?'b-amber':'b-gray')+'">'+(hoje?'Hoje':'Prev. '+fmtData(o.dataPrevista))+'</span>':'')
       +(o.tecnico&&S.filtro!=='minhas'?'<span class="badge b-gray">👷 '+esc(o.tecnico)+'</span>':'')
       +(o._em?'<span class="badge b-gray">'+fmtDH(o._em)+'</span>':'')
       +statusReg(o.id)+'</div></div></div>';
