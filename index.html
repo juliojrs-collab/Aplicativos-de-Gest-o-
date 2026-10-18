@@ -88,6 +88,11 @@ main{max-width:1100px;margin:0 auto;padding:16px 16px 96px;}
 .it-total{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;background:var(--blue-light);color:var(--blue-dark);border-radius:var(--r2);padding:10px 12px;margin:12px 0;font-size:13px;}
 .it-total b{font-size:16px;}
 .btn-del{background:#fff;color:var(--red);border:1px solid var(--red);}
+.sig-wrap{position:relative;border:2px dashed var(--border2);border-radius:var(--r2);background:#fff;height:170px;touch-action:none;}
+.sig-wrap canvas{width:100%;height:100%;display:block;touch-action:none;cursor:crosshair;}
+.sig-ph{position:absolute;left:0;right:0;top:50%;transform:translateY(-50%);text-align:center;color:var(--text3);pointer-events:none;font-size:14px;}
+.sig-img{background:#fff;border:1px solid var(--border);border-radius:var(--r2);padding:6px;max-width:360px;}
+.sig-img img{width:100%;display:block;}
 .b-orange{background:#fdeedd;color:#b45309;}
 .b-gray{background:#eef0f3;color:var(--text2);}
 .late{color:var(--red);font-weight:700;}
@@ -502,6 +507,51 @@ function fecharModal(){
   $('modal').innerHTML='';document.body.style.overflow='';S.abertaId=null;S.modo=null;
 }
 
+/* ═══ Assinatura do cliente ══════════════════════════════════════════════
+   Quadro de desenho com o dedo (ou caneta/mouse). Sai como PNG pequeno,
+   guardado na própria OS e impresso no relatório de entrada. */
+var TERMO_ENTRADA='Declaro que entreguei o aparelho descrito acima nas condições registradas (fotos e respostas) e autorizo a Purific a avaliá-lo. O orçamento será enviado para minha aprovação antes de qualquer serviço.';
+var SIG=null;
+function assinHtml(){
+  return'<div class="info" style="font-size:12px;">'+esc(TERMO_ENTRADA)+'</div>'
+    +'<div class="sig-wrap"><canvas id="sig-cv"></canvas><span class="sig-ph" id="sig-ph">Cliente assina aqui com o dedo</span></div>'
+    +'<div style="display:flex;justify-content:space-between;align-items:center;margin:6px 0 12px;"><span class="hint" style="margin:0">A assinatura fica salva na OS e no relatório.</span>'
+    +'<button type="button" class="btn btn-g btn-sm" onclick="limparAssin()">Limpar</button></div>';
+}
+function initAssin(){
+  var cv=$('sig-cv');if(!cv)return;
+  var r=cv.getBoundingClientRect(),dpr=window.devicePixelRatio||1;
+  cv.width=Math.round(r.width*dpr);cv.height=Math.round(r.height*dpr);
+  var ctx=cv.getContext('2d');ctx.scale(dpr,dpr);
+  ctx.lineWidth=2.4;ctx.lineCap='round';ctx.lineJoin='round';ctx.strokeStyle='#111827';
+  SIG={cv:cv,ctx:ctx,vazio:true,des:false};
+  function pt(e){var b=cv.getBoundingClientRect();return{x:e.clientX-b.left,y:e.clientY-b.top};}
+  cv.onpointerdown=function(e){e.preventDefault();cv.setPointerCapture(e.pointerId);SIG.des=true;var p=pt(e);ctx.beginPath();ctx.moveTo(p.x,p.y);ctx.lineTo(p.x+0.1,p.y+0.1);ctx.stroke();
+    if(SIG.vazio){SIG.vazio=false;var ph=$('sig-ph');if(ph)ph.style.display='none';}};
+  cv.onpointermove=function(e){if(!SIG.des)return;e.preventDefault();var p=pt(e);ctx.lineTo(p.x,p.y);ctx.stroke();};
+  cv.onpointerup=cv.onpointercancel=function(){SIG.des=false;};
+}
+function limparAssin(){
+  if(!SIG)return;
+  SIG.ctx.clearRect(0,0,SIG.cv.width,SIG.cv.height);SIG.vazio=true;
+  var ph=$('sig-ph');if(ph)ph.style.display='';
+}
+/* PNG reduzido a 600px de largura: legível no PDF e leve no Firestore. */
+function lerAssin(){
+  if(!SIG||SIG.vazio)return null;
+  var W=600,H=Math.round(SIG.cv.height*W/SIG.cv.width),c=document.createElement('canvas');
+  c.width=W;c.height=H;c.getContext('2d').drawImage(SIG.cv,0,0,W,H);
+  return{img:c.toDataURL('image/png'),w:W,h:H,em:Date.now(),termo:TERMO_ENTRADA};
+}
+function colherAssinatura(id){
+  var o=getOS(id);
+  passoSimples('Assinatura do cliente','<div class="sub" style="margin-bottom:8px;">'+esc(osLabel(o))+' · '+esc(o.cliente&&o.cliente.nome||'')+' · '+esc(aparelho(o))+'</div>'+assinHtml(),'Salvar assinatura',async function(){
+    var a=lerAssin();if(!a){psErro('Peça para o cliente assinar no quadro.');return false;}
+    await avancar(id,{assinatura:a},'Assinatura salva');
+  });
+  initAssin();
+}
+
 /* ═══ Recepção: nova OS ══════════════════════════════════════════════════ */
 var NV={};
 function novaOS(){
@@ -524,11 +574,12 @@ function novaOS(){
     +'<div class="field"><label>Atendente</label><input id="nv-atend" value="'+esc(lerLocal('atendente'))+'"/></div>'
     +'<div class="sec">Como o aparelho chegou</div>'
     +midiaFormHtml('Fotos de entrada (até 6)',false,true)
+    +'<div class="sec">Assinatura do cliente</div>'+assinHtml()
     +'<div class="sec">Número da OS</div>'
     +'<div id="nv-num"></div>'
     +'<div id="nv-err"></div>'
     +'<button class="btn btn-p btn-lg" id="nv-ok" onclick="salvarNovaOS()">Registrar entrada</button>');
-  renderCliente();renderNumero();renderMidiaForm();
+  renderCliente();renderNumero();renderMidiaForm();initAssin();
 }
 function lerLocal(k){try{return localStorage.getItem('oficina_'+k)||'';}catch(e){return'';}}
 function gravarLocal(k,v){try{localStorage.setItem('oficina_'+k,v);}catch(e){}}
@@ -594,6 +645,9 @@ async function salvarNovaOS(){
   if(!F.fotos.length)falta.push('pelo menos 1 foto de entrada');
   if(NV.manual&&!val('nv-numero'))falta.push('nº da OS');
   if(falta.length){nvErro('Falta preencher: '+falta.join(', ')+'.');return;}
+  var assin=lerAssin();
+  if(!assin&&!confirm('O cliente não assinou. Registrar a entrada sem assinatura?\n(Dá para colher a assinatura depois, na OS.)'))return;
+  if(assin)os.assinatura=assin;
   btn.disabled=true;
   try{
     if(NV.manual){os.numero=val('nv-numero');os.blingId=null;}
@@ -687,7 +741,11 @@ function detalheHtml(o,midias){
     +(o.acessorios?'<dt>Acessórios</dt><dd>'+esc(o.acessorios)+'</dd>':'')
     +'<dt>Problema relatado</dt><dd>'+esc(o.problema||'-')+'</dd>'
     +(o.questionario?'<dt>Questionário</dt><dd>'+esc(o.questionario)+'</dd>':'')
-    +'</dl><div class="sec">Fotos de entrada</div><div id="det-mid">'+(midias?galeria(midias,'entrada'):'<div class="sub">Carregando…</div>')+'</div></div>';
+    +'</dl><div class="sec">Fotos de entrada</div><div id="det-mid">'+(midias?galeria(midias,'entrada'):'<div class="sub">Carregando…</div>')+'</div>'
+    +'<div class="sec">Assinatura do cliente</div>'
+    +(o.assinatura?'<div class="sig-img"><img src="'+o.assinatura.img+'"/></div><div class="sub">Assinado em '+fmtDH(o.assinatura.em)+'</div>'
+      :'<div class="sub" style="margin-bottom:6px;">Sem assinatura.</div><button class="btn btn-g btn-sm" onclick="colherAssinatura(\''+o.id+'\')">✍️ Colher assinatura do cliente</button>')
+    +'</div>';
   if(o.orcamento){
     var q=o.orcamento;
     h+='<div class="card"><h3>Orçamento</h3><dl class="kv">'
@@ -1329,17 +1387,25 @@ function montarPdfEntrada(o,fotos){
     'Guarde este comprovante: o número da OS identifica o seu aparelho na loja.'];
   doc.setFont('helvetica','normal');
   termo.forEach(function(t){var l=doc.splitTextToSize('• '+t,MR-ML-4);chk(l.length*4.5);doc.text(l,ML+2,y);y+=l.length*4.5+1;});
+  if(o.assinatura&&o.assinatura.termo){
+    section('Declaração do cliente');
+    var ld=doc.splitTextToSize(o.assinatura.termo,MR-ML-4);chk(ld.length*4.5);
+    doc.setFont('helvetica','normal');doc.text(ld,ML+2,y);y+=ld.length*4.5+1;
+  }
   /* Assinaturas: cliente e loja */
   if(y+40>272)y=pdfNovaPagina(doc);
   y+=8;
   doc.setDrawColor(215,222,226);doc.setLineWidth(0.3);doc.roundedRect(ML,y,MR-ML,32,2,2,'S');
   doc.setFontSize(7.5);doc.setTextColor(110,110,110);doc.text('Sorocaba/SP, '+dataExtenso(new Date(o.tempos&&o.tempos.recebido||Date.now())),ML+6,y+7);
   var cx1=ML+(MR-ML)/4,cx2=ML+3*(MR-ML)/4;
+  if(o.assinatura&&o.assinatura.img){
+    try{var sh=15,sw=Math.min(70,sh*(o.assinatura.w||600)/Math.max(1,o.assinatura.h||200));doc.addImage(o.assinatura.img,'PNG',cx1-sw/2,y+4.5,sw,sh);}catch(e){}
+  }
   doc.setDrawColor(70,70,70);doc.setLineWidth(0.35);doc.line(cx1-36,y+20,cx1+36,y+20);doc.line(cx2-36,y+20,cx2+36,y+20);
   doc.setFont('helvetica','bold');doc.setFontSize(8.5);doc.setTextColor(az[0],az[1],az[2]);
   doc.text(c.nome||'Cliente',cx1,y+25,{align:'center'});doc.text(PURIFIC.nome,cx2,y+25,{align:'center'});
   doc.setFont('helvetica','normal');doc.setFontSize(6.5);doc.setTextColor(140,140,140);
-  doc.text('Cliente',cx1,y+29,{align:'center'});doc.text('Atendente: '+(o.atendente||'-'),cx2,y+29,{align:'center'});
+  doc.text(o.assinatura?'Cliente · assinado em '+fmtDH(o.assinatura.em):'Cliente',cx1,y+29,{align:'center'});doc.text('Atendente: '+(o.atendente||'-'),cx2,y+29,{align:'center'});
   doc.setTextColor(30,30,30);
   pdfRodape(doc,new Date().toLocaleDateString('pt-BR'));
   return doc;
