@@ -248,6 +248,7 @@ function dataPadrao(datas){
   for(var i=0;i<datas.length;i++)if(datas[i]>=h)return datas[i];
   return datas[datas.length-1]||'';
 }
+function idsAssinados(){return Object.keys(S.reg).filter(function(id){return!!S.reg[id].assinatura;});}
 function statusReg(id){
   var r=S.reg[String(id)];
   if(!r)return'';
@@ -264,7 +265,7 @@ function renderLista(){
     +'<div class="chips" id="chips-datas">'
     +dl.datas.map(function(d){return'<button class="chip'+(S.filtro===d?' on':'')+'" data-d="'+d+'" onclick="filtrar(\''+d+'\')">'+esc(rotuloDia(d))+' ('+dl.cont[d]+')</button>';}).join('')
     +'</div><div class="chips">'
-    +'<button class="chip'+(S.filtro==='feitas'?' on':'')+'" onclick="filtrar(\'feitas\')">✍️ Assinados ('+Object.keys(S.reg).length+')</button>'
+    +'<button class="chip'+(S.filtro==='feitas'?' on':'')+'" onclick="filtrar(\'feitas\')">✍️ Assinados ('+idsAssinados().length+')</button>'
     +'<button class="chip" onclick="carregarLista()">'+(S.carregando?'<span class="spin"></span>':'↻')+' Atualizar</button></div>';
   if(S.listaErr)h+='<div class="err">Não foi possível buscar os pedidos no Bling: '+esc(S.listaErr)+'</div>';
   if(S.carregando&&!S.lista)h+='<div class="info"><span class="spin"></span> Buscando as entregas no Bling…</div>';
@@ -283,7 +284,7 @@ function desenharItens(){
     /* Busca procura em todas as datas, não só na escolhida. */
     lista=lista.filter(function(o){return semAcento([o.numero,o.cliente].join(' ')).indexOf(q)>=0;});
   }else if(S.filtro==='feitas'){
-    lista=Object.keys(S.reg).map(function(id){var r=S.reg[id];return{id:Number(id),numero:r.numero,cliente:r.cliente,total:r.total,dataPrevista:r.pedido&&r.pedido.dataPrevista,_em:r.atualizadoEm};})
+    lista=idsAssinados().map(function(id){var r=S.reg[id];return{id:Number(id),numero:r.numero,cliente:r.cliente,total:r.total,dataPrevista:r.pedido&&r.pedido.dataPrevista,_em:r.atualizadoEm};})
       .sort(function(a,b){return(b._em||0)-(a._em||0);});
   }else{
     lista=lista.filter(function(o){return prev(o)===S.filtro;});
