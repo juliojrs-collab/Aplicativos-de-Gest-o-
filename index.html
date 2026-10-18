@@ -107,7 +107,16 @@ main{max-width:1100px;margin:0 auto;padding:16px 16px 96px;}
 .imp-row input{width:20px;height:20px;flex:none;}
 .imp-row>div{flex:1;min-width:0;font-size:13px;}
 .imp-off{opacity:.5;}
-.os-ap{color:var(--text);font-weight:600;}
+.os-ap{color:var(--text);font-weight:600;white-space:normal!important;}
+/* No celular, prazo e etapa descem para a linha de baixo: nome, modelo e cor
+   ficam inteiros, para achar o aparelho na prateleira sem abrir a OS. */
+@media(max-width:600px){
+  .os{flex-wrap:wrap;row-gap:6px;}
+  .os-main{flex:1 1 calc(100% - 76px);}
+  .os-main .t{white-space:normal;}
+  .os-side{flex:1 1 100%;text-align:left;display:flex;flex-wrap:wrap;align-items:center;gap:6px;padding-left:76px;}
+  .os-side>div{margin-top:0!important;}
+}
 .b-orange{background:#fdeedd;color:#b45309;}
 .b-gray{background:#eef0f3;color:var(--text2);}
 .late{color:var(--red);font-weight:700;}
