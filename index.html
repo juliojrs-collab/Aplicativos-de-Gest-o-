@@ -100,6 +100,9 @@ main{max-width:1100px;margin:0 auto;padding:16px 16px 96px;}
 .sig-ph{position:absolute;left:0;right:0;top:50%;transform:translateY(-50%);text-align:center;color:var(--text3);pointer-events:none;font-size:14px;}
 .sig-img{background:#fff;border:1px solid var(--border);border-radius:var(--r2);padding:6px;max-width:360px;}
 .sig-img img{width:100%;display:block;}
+.grp{display:flex;align-items:center;gap:8px;margin:18px 0 8px;font-size:13px;}
+.grp:first-of-type{margin-top:4px;}
+.os-late{border-left:4px solid var(--red);}
 .b-orange{background:#fdeedd;color:#b45309;}
 .b-gray{background:#eef0f3;color:var(--text2);}
 .late{color:var(--red);font-weight:700;}
@@ -469,8 +472,56 @@ function render(){
 }
 
 /* ═══ Lista de OS ════════════════════════════════════════════════════════ */
+/* ═══ Prazos prometidos ao cliente ═════════════════════════════════════
+   Duas datas por OS: quando o orçamento será passado ao cliente (definida na
+   recepção) e quando o serviço fica pronto (definida na aprovação). Datas no
+   formato AAAA-MM-DD; o prazo vale até o fim do dia. */
+function isoDia(d){return d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate());}
+function maisDias(n){var d=new Date();d.setDate(d.getDate()+n);return isoDia(d);}
+function fmtData(iso){if(!iso)return'-';var p=iso.split('-');return p[2]+'/'+p[1]+'/'+p[0];}
+function fimDoDia(iso){var p=iso.split('-');return new Date(+p[0],p[1]-1,+p[2],23,59,59,999).getTime();}
+function diasPara(iso){var p=iso.split('-'),h=new Date();h.setHours(0,0,0,0);return Math.round((new Date(+p[0],p[1]-1,+p[2])-h)/86400000);}
+var ETAPAS_PRAZO_ORC=['recebido','em_orcamento','aguardando_preco'],ETAPAS_PRAZO_SERV=['aprovado','em_servico'];
+/* O prazo que está valendo agora, conforme a etapa. */
+function prazoAtual(o){
+  var pz=o.prazos||{};
+  if(ETAPAS_PRAZO_ORC.indexOf(o.etapa)>=0)return{l:'Orçamento',data:pz.orcamento};
+  if(ETAPAS_PRAZO_SERV.indexOf(o.etapa)>=0)return{l:'Finalização',data:pz.entrega};
+  return null;
+}
+function prazoVencido(o){var p=prazoAtual(o);return!!(p&&p.data&&diasPara(p.data)<0);}
+function chavePrazo(o){var p=prazoAtual(o);return p&&p.data?fimDoDia(p.data):9e15;}
+function textoPrazo(iso){var d=diasPara(iso);return d<0?'atrasado '+(-d)+' dia'+(d<-1?'s':''):d===0?'vence hoje':d===1?'vence amanhã':'faltam '+d+' dias';}
+function prazoBadge(o){
+  var p=prazoAtual(o);if(!p)return'';
+  if(!p.data)return'<span class="badge b-gray">'+p.l+': sem prazo</span>';
+  var d=diasPara(p.data);
+  return'<span class="badge '+(d<0?'b-red':d===0?'b-amber':'b-gray')+'">'+p.l+' '+fmtData(p.data).slice(0,5)+' · '+textoPrazo(p.data)+'</span>';
+}
+/* Quando cada prazo foi cumprido de fato. */
+function entregaOrc(o){var t=o.tempos||{};return t.precificado||t.resposta||null;}
+function situacaoPrazo(iso,feitoEm){
+  if(!iso)return'<span class="sub">sem prazo definido</span>';
+  if(feitoEm)return feitoEm<=fimDoDia(iso)?'<span class="badge b-green">cumprido · '+fmtDH(feitoEm)+'</span>':'<span class="badge b-red">entregue com atraso · '+fmtDH(feitoEm)+'</span>';
+  var d=diasPara(iso);return'<span class="badge '+(d<0?'b-red':d===0?'b-amber':'b-gray')+'">'+textoPrazo(iso)+'</span>';
+}
+function alterarPrazos(id){
+  var o=getOS(id),pz=o.prazos||{};
+  passoSimples('Prazos informados ao cliente',
+    '<div class="field"><label>Previsão do orçamento</label><input type="date" id="pz-orc" value="'+esc(pz.orcamento||'')+'"/></div>'
+    +'<div class="field"><label>Previsão de finalização do serviço</label><input type="date" id="pz-ent" value="'+esc(pz.entrega||'')+'"/></div>'
+    +'<div class="hint" style="margin-bottom:12px;">Se mudar uma data, avise o cliente da nova previsão.</div>',
+    'Salvar prazos',async function(){
+      var upd={},a=val('pz-orc'),b=val('pz-ent');
+      if(a)upd['prazos.orcamento']=a;if(b)upd['prazos.entrega']=b;
+      if(!a&&!b){psErro('Informe pelo menos uma data.');return false;}
+      await avancar(id,upd,'Prazos atualizados');
+    });
+}
+
 var FILTROS=[
   {k:'abertas',l:'Abertas',f:function(o){return o.etapa!=='entregue';}},
+  {k:'atrasadas',l:'⚠ Atrasadas',f:prazoVencido},
   {k:'oficina',l:'Na oficina',f:function(o){return['recebido','em_orcamento','aprovado','em_servico'].indexOf(o.etapa)>=0;}},
   {k:'balcao',l:'No balcão',f:function(o){return['aguardando_preco','aguardando_aprovacao','pronto','devolver'].indexOf(o.etapa)>=0;}},
   {k:'paradas',l:'Paradas',f:function(o){return o.etapa!=='entregue'&&atrasada(o);}}
@@ -490,18 +541,31 @@ function vLista(){
     return'<button class="chip'+(S.filtro===x.k?' on':'')+'" onclick="S.filtro=\''+x.k+'\';render()">'+esc(x.l)+'<b>'+n+'</b></button>';
   }).join('')+'</div>';
   if(!list.length)h+='<div class="empty">Nenhuma OS aqui.</div>';
-  list.forEach(function(o){
-    var d=desdeEtapa(o);
-    h+='<div class="card os" onclick="abrirOS(\''+o.id+'\')">'
+  /* Mais urgente primeiro: prazo mais próximo (atrasadas no topo); sem prazo
+     vai para o fim, na ordem de chegada. */
+  list.sort(function(a,b){return chavePrazo(a)-chavePrazo(b)||(a.criadoEm||0)-(b.criadoEm||0);});
+  if(S.filtro==='abertas'&&!q){
+    ETAPAS.forEach(function(e){
+      var g=list.filter(function(o){return o.etapa===e.k;});if(!g.length)return;
+      var atr=g.filter(prazoVencido).length;
+      h+='<div class="grp">'+etapaBadge(e.k)+' <b>'+g.length+'</b>'+(atr?' <span class="badge b-red">'+atr+' atrasada'+(atr>1?'s':'')+'</span>':'')+'</div>';
+      g.forEach(function(o){h+=cardOS(o,true);});
+    });
+  }else list.forEach(function(o){h+=cardOS(o);});
+  h+='<button class="btn btn-p fab" onclick="novaOS()">＋ Receber aparelho</button>';
+  return h;
+}
+function cardOS(o,agrupado){
+    var d=desdeEtapa(o),h='';
+    h+='<div class="card os'+(prazoVencido(o)?' os-late':'')+'" onclick="abrirOS(\''+o.id+'\')">'
       +'<div class="os-num">'+esc(o.numero||'s/ nº')+'</div>'
       +'<div class="os-main"><div class="t">'+esc(o.cliente&&o.cliente.nome||'-')+'</div>'
       +'<div class="s">'+esc(aparelho(o))+(o.tecnico?' · '+esc(o.tecnico):'')+'</div></div>'
-      +'<div class="os-side">'+etapaBadge(o.etapa)
-      +(o.etapa!=='entregue'&&d!=null?'<div class="'+(atrasada(o)?'late':'sub')+'" style="margin-top:4px;">há '+fmtDur(d)+'</div>':'<div class="sub" style="margin-top:4px;">'+fmtDH(o.tempos.entregue)+'</div>')
+      +'<div class="os-side">'+(agrupado?'':etapaBadge(o.etapa))
+      +(prazoAtual(o)?'<div style="'+(agrupado?'':'margin-top:4px;')+'">'+prazoBadge(o)+'</div>':'')
+      +(o.etapa!=='entregue'&&d!=null?'<div class="'+(atrasada(o)?'late':'sub')+'" style="margin-top:4px;">na etapa há '+fmtDur(d)+'</div>':'<div class="sub" style="margin-top:4px;">'+fmtDH(o.tempos.entregue)+'</div>')
       +'</div></div>';
-  });
-  h+='<button class="btn btn-p fab" onclick="novaOS()">＋ Receber aparelho</button>';
-  return h;
+    return h;
 }
 
 /* ═══ Modal ══════════════════════════════════════════════════════════════ */
@@ -637,6 +701,7 @@ function novaOS(){
     +'<div class="g2"><div class="field"><label>Nº de série</label><input id="nv-serie"/></div>'
     +'<div class="field"><label>Condição de limpeza</label><select id="nv-cond"><option value="">Selecione…</option>'+cond+'</select></div></div>'
     +'<div class="field"><label>Acessórios que vieram junto</label><input id="nv-acess" placeholder="Ex: refil, bandeja, mangueira, fonte…"/></div>'
+    +'<div class="field"><label>Previsão do orçamento (informe ao cliente) <span class="req">*</span></label><input type="date" id="nv-prazo" value="'+maisDias(2)+'" min="'+maisDias(0)+'"/></div>'
     +'<div class="sec">O que o cliente falou</div>'
     +'<div class="field"><label>Problema relatado <span class="req">*</span></label><textarea id="nv-prob" rows="3"></textarea></div>'
     +'<div class="sec">Questionário de entrada</div>'+questHtml('nv',null)
@@ -704,7 +769,7 @@ async function salvarNovaOS(){
                     :{nome:val('nv-nome'),documento:val('nv-doc'),telefone:val('nv-tel'),blingId:null};
   var os={
     cliente:cli,marca:val('nv-marca'),modelo:val('nv-modelo'),nSerie:val('nv-serie'),condicao:val('nv-cond'),
-    acessorios:val('nv-acess'),problema:val('nv-prob'),atendente:val('nv-atend')
+    acessorios:val('nv-acess'),problema:val('nv-prob'),atendente:val('nv-atend'),prazos:{orcamento:val('nv-prazo')}
   };
   var falta=[];
   if(!cli.nome)falta.push('nome do cliente');
@@ -712,6 +777,7 @@ async function salvarNovaOS(){
   if(!os.marca)falta.push('marca');
   if(!os.modelo)falta.push('modelo');
   if(!os.problema)falta.push('problema relatado');
+  if(!os.prazos.orcamento)falta.push('previsão do orçamento');
   var qz=questLer('nv');os.respostas=qz.respostas;os.questionario=questTexto(qz.respostas);
   if(qz.falta.length)falta.push('questionário (pergunta'+(qz.falta.length>1?'s ':' ')+qz.falta.join(', ')+')');
   if(!F.fotos.length)falta.push('pelo menos 1 foto de entrada');
@@ -781,6 +847,12 @@ function detalheHtml(o,midias){
   var h='<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px;">'+etapaBadge(o.etapa)
     +(o.etapa!=='entregue'&&desdeEtapa(o)!=null?'<span class="'+(atrasada(o)?'late':'sub')+'">nesta etapa há '+fmtDur(desdeEtapa(o))+'</span>':'')+'</div>';
   h+=acoesHtml(o);
+  /* Prazos prometidos ao cliente */
+  var pz=o.prazos||{};
+  h+='<div class="card"><h3>Prazos informados ao cliente</h3><dl class="kv">'
+    +'<dt>Orçamento até</dt><dd>'+fmtData(pz.orcamento)+' '+situacaoPrazo(pz.orcamento,entregaOrc(o))+'</dd>'
+    +(o.aprovado===false?'':'<dt>Finalização até</dt><dd>'+(pz.entrega?fmtData(pz.entrega)+' '+situacaoPrazo(pz.entrega,o.tempos.servFim):'<span class="sub">definida quando o cliente aprovar</span>')+'</dd>')
+    +'</dl><div style="text-align:right;margin-top:8px;"><button class="btn btn-g btn-sm" onclick="alterarPrazos(\''+o.id+'\')">📅 Alterar prazos</button></div></div>';
   /* Linha do tempo */
   var passos=[
     {k:'recebido',l:'Entrada na loja',quem:o.atendente},
@@ -1111,9 +1183,12 @@ function editarOrc(id){
 }
 function respostaCliente(id,aprovou){
   passoSimples(aprovou?'Cliente aprovou o orçamento':'Cliente não aprovou',
-    '<div class="field"><label>Observação (opcional)</label><textarea id="ps-obs" rows="2" placeholder="'+(aprovou?'Ex: pediu urgência':'Ex: achou caro, vai comprar um novo')+'"></textarea></div>',
+    (aprovou?'<div class="field"><label>Previsão de finalização (informe ao cliente) <span class="req">*</span></label><input type="date" id="ps-prazo" value="'+maisDias(3)+'" min="'+maisDias(0)+'"/></div>':'')
+    +'<div class="field"><label>Observação (opcional)</label><textarea id="ps-obs" rows="2" placeholder="'+(aprovou?'Ex: pediu urgência':'Ex: achou caro, vai comprar um novo')+'"></textarea></div>',
     'Confirmar',async function(){
-      await avancar(id,{etapa:aprovou?'aprovado':'devolver','tempos.resposta':Date.now(),aprovado:aprovou,obsResposta:val('ps-obs')},
+      var upd={etapa:aprovou?'aprovado':'devolver','tempos.resposta':Date.now(),aprovado:aprovou,obsResposta:val('ps-obs')};
+      if(aprovou){var pz=val('ps-prazo');if(!pz){psErro('Informe a previsão de finalização.');return false;}upd['prazos.entrega']=pz;}
+      await avancar(id,upd,
         aprovou?'Aprovado — vai para a fila da oficina':'Registrado — devolver ao cliente');
     });
 }
@@ -1455,6 +1530,7 @@ function montarPdfEntrada(o,fotos){
   line('Nome',c.nome);line('Telefone',c.telefone);line('CPF/CNPJ',c.documento);
   section('Aparelho');
   line('Purificador',aparelho(o));line('N° de série',o.nSerie);
+  if(o.prazos&&o.prazos.orcamento)line('Previsão do orçamento',fmtData(o.prazos.orcamento));
   line('Condição de limpeza',o.condicao);line('Acessórios entregues',o.acessorios||'Nenhum');
   section('Problema relatado pelo cliente');
   var lp=doc.splitTextToSize(o.problema||'-',MR-ML-4);chk(lp.length*4.5+2);
@@ -1531,6 +1607,12 @@ function vPainel(){
   var entregues=per.filter(function(o){return o.etapa==='entregue';});
   var respondidas=per.filter(function(o){return o.aprovado===true||o.aprovado===false;});
   var aprov=respondidas.filter(function(o){return o.aprovado===true;}).length;
+  /* Prazos cumpridos: só conta o que já foi entregue e tinha prazo. */
+  var orcPz=per.filter(function(o){return o.prazos&&o.prazos.orcamento&&entregaOrc(o);});
+  var orcOk=orcPz.filter(function(o){return entregaOrc(o)<=fimDoDia(o.prazos.orcamento);}).length;
+  var srvPz=per.filter(function(o){return o.prazos&&o.prazos.entrega&&o.tempos.servFim;});
+  var srvOk=srvPz.filter(function(o){return o.tempos.servFim<=fimDoDia(o.prazos.entrega);}).length;
+  var atrasadasAgora=abertas.filter(prazoVencido);
   var porTrecho={};TRECHOS.forEach(function(x){porTrecho[x.k]=[];});
   per.forEach(function(o){var d=duracoes(o);for(var k in d)porTrecho[k].push(d[k]);});
   var h='<div class="ph"><div><h2>Medição</h2><p class="sub">Tempo de cada etapa, contado em horas corridas (inclui noites e fins de semana).</p></div>'
@@ -1541,6 +1623,9 @@ function vPainel(){
     +'<div class="kpi"><div class="l">Entregues</div><div class="v">'+entregues.length+'</div><div class="h">das recebidas no período</div></div>'
     +'<div class="kpi"><div class="l">Abertas agora</div><div class="v">'+abertas.length+'</div><div class="h">'+paradas.length+' paradas</div></div>'
     +'<div class="kpi"><div class="l">Tempo total médio</div><div class="v">'+fmtDur(media(porTrecho.total))+'</div><div class="h">mediana '+fmtDur(mediana(porTrecho.total))+'</div></div>'
+    +'<div class="kpi"><div class="l">Orçamentos no prazo</div><div class="v">'+(orcPz.length?Math.round(orcOk/orcPz.length*100)+'%':'-')+'</div><div class="h">'+orcOk+' de '+orcPz.length+'</div></div>'
+    +'<div class="kpi"><div class="l">Serviços no prazo</div><div class="v">'+(srvPz.length?Math.round(srvOk/srvPz.length*100)+'%':'-')+'</div><div class="h">'+srvOk+' de '+srvPz.length+'</div></div>'
+    +'<div class="kpi"><div class="l">Atrasadas agora</div><div class="v'+(atrasadasAgora.length?' late':'')+'">'+atrasadasAgora.length+'</div><div class="h">prazo prometido vencido</div></div>'
     +'<div class="kpi"><div class="l">Aprovação</div><div class="v">'+(respondidas.length?Math.round(aprov/respondidas.length*100)+'%':'-')+'</div><div class="h">'+aprov+' de '+respondidas.length+' orçamentos</div></div>'
     +'</div>';
   var etapasT=TRECHOS.filter(function(x){return x.k!=='total';});
