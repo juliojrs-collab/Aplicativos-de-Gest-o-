@@ -509,6 +509,35 @@ function situacaoPrazo(iso,feitoEm){
   if(feitoEm)return feitoEm<=fimDoDia(iso)?'<span class="badge b-green">cumprido · '+fmtDH(feitoEm)+'</span>':'<span class="badge b-red">entregue com atraso · '+fmtDH(feitoEm)+'</span>';
   var d=diasPara(iso);return'<span class="badge '+(d<0?'b-red':d===0?'b-amber':'b-gray')+'">'+textoPrazo(iso)+'</span>';
 }
+/* Datas da OS no Bling (combinado com a loja): Data prevista = previsão do
+   orçamento; Data de conclusão = serviço concluído; Data de saída = aparelho
+   entregue. Roda depois de salvar no app: se o Bling falhar, o app já está
+   gravado e a falha fica anotada na OS para tentar de novo. */
+async function datasBling(id,datas){
+  var o=getOS(id);if(!o||!o.blingId)return;
+  try{
+    var r=await fetch(API+'/api/bling/os/'+o.blingId+'/datas',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(datas)});
+    var j=await r.json().catch(function(){return{};});
+    if(!r.ok)throw new Error(j.error||('HTTP '+r.status));
+    await db.collection(C_OS).doc(id).update({blingDatasErro:'',blingDatas:Object.assign({},o.blingDatas||{},datas)});
+  }catch(e){
+    try{await db.collection(C_OS).doc(id).update({blingDatasErro:e.message,blingDatasPendentes:Object.assign({},o.blingDatasPendentes||{},datas)});}catch(x){}
+    toast('Datas não foram para o Bling: '+e.message);
+  }
+}
+function datasDaOS(o){
+  var t=o.tempos||{},d={};
+  if(o.prazos&&o.prazos.orcamento)d.dataPrevista=o.prazos.orcamento;
+  if(t.servFim)d.dataConclusao=isoDia(new Date(t.servFim));
+  if(t.entregue)d.dataSaida=isoDia(new Date(t.entregue));
+  return d;
+}
+async function reenviarDatasBling(id){
+  var o=getOS(id);if(!o)return;
+  toast('Enviando datas ao Bling…');
+  await datasBling(id,datasDaOS(o));
+  var n=getOS(id);if(n&&!n.blingDatasErro){await db.collection(C_OS).doc(id).update({blingDatasPendentes:null});toast('Datas enviadas ao Bling');}
+}
 function alterarPrazos(id){
   var o=getOS(id),pz=o.prazos||{};
   passoSimples('Prazos informados ao cliente',
@@ -520,6 +549,7 @@ function alterarPrazos(id){
       if(a)upd['prazos.orcamento']=a;if(b)upd['prazos.entrega']=b;
       if(!a&&!b){psErro('Informe pelo menos uma data.');return false;}
       await avancar(id,upd,'Prazos atualizados');
+      if(a&&a!==(o.prazos||{}).orcamento)datasBling(id,{dataPrevista:a});
     });
 }
 
@@ -801,7 +831,7 @@ async function salvarNovaOS(){
       var r=await fetch(API+'/api/bling/os',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
         chave:NV.chave,
         contato:cli.blingId?{id:cli.blingId}:{nome:cli.nome,telefone:cli.telefone,documento:cli.documento},
-        equipamento:aparelho(os),numeroSerie:os.nSerie,descricaoProblema:os.problema,
+        equipamento:aparelho(os),numeroSerie:os.nSerie,descricaoProblema:os.problema,dataPrevista:os.prazos.orcamento,
         observacoes:[os.questionario,os.acessorios?'Acessórios: '+os.acessorios:'',os.condicao?'Condição: '+os.condicao:''].filter(Boolean).join('\n\n')
       })});
       var j=await r.json().catch(function(){return{};});
@@ -855,8 +885,10 @@ function detalheHtml(o,midias){
   var pz=o.prazos||{};
   h+='<div class="card"><h3>Prazos informados ao cliente</h3><dl class="kv">'
     +'<dt>Orçamento até</dt><dd>'+fmtData(pz.orcamento)+' '+situacaoPrazo(pz.orcamento,entregaOrc(o))+'</dd>'
-    +(o.aprovado===false?'':'<dt>Finalização até</dt><dd>'+(pz.entrega?fmtData(pz.entrega)+' '+situacaoPrazo(pz.entrega,o.tempos.servFim):'<span class="sub">definida pelo comercial ao colocar o preço</span>')+'</dd>')
-    +'</dl><div style="text-align:right;margin-top:8px;"><button class="btn btn-g btn-sm" onclick="alterarPrazos(\''+o.id+'\')">📅 Alterar prazos</button></div></div>';
+    +(o.aprovado===false?'':'<dt>Finalização até</dt><dd>'+(pz.entrega?fmtData(pz.entrega)+' '+situacaoPrazo(pz.entrega,o.tempos.servFim):'<span class="sub">definida pelo técnico ao finalizar o orçamento</span>')+'</dd>')
+    +'</dl>'
+    +(o.blingId&&o.blingDatasErro?'<div class="err" style="margin-top:8px;">As datas não foram para o Bling: '+esc(o.blingDatasErro)+' <button class="btn btn-g btn-sm" onclick="reenviarDatasBling(\''+o.id+'\')">Tentar de novo</button></div>':'')
+    +'<div style="text-align:right;margin-top:8px;"><button class="btn btn-g btn-sm" onclick="alterarPrazos(\''+o.id+'\')">📅 Alterar prazos</button></div></div>';
   /* Linha do tempo */
   var passos=[
     {k:'recebido',l:'Entrada na loja',quem:o.atendente},
@@ -999,7 +1031,9 @@ function orcFormHtml(o){
   return tecnicoSelect('ps-tec',o.tecnicoOrc)
     +'<div class="field"><label>Diagnóstico <span class="req">*</span></label><textarea id="ps-diag" rows="3">'+esc(q.diagnostico||'')+'</textarea></div>'
     +'<div class="field"><label>Serviços a realizar</label><textarea id="ps-serv" rows="2">'+esc(q.servicos||'')+'</textarea></div>'
-    +'<div class="field"><label>Peças necessárias</label><textarea id="ps-pecas" rows="3" placeholder="Uma peça por linha">'+esc(q.pecas||'')+'</textarea></div>';
+    +'<div class="field"><label>Peças necessárias</label><textarea id="ps-pecas" rows="3" placeholder="Uma peça por linha">'+esc(q.pecas||'')+'</textarea></div>'
+    +'<div class="field"><label>Previsão de término do serviço <span class="req">*</span></label><input type="date" id="ps-termino" value="'+esc((o.prazos&&o.prazos.entrega)||maisDias(3))+'"/>'
+    +'<div class="hint">Em quanto tempo você termina o conserto, se o cliente aprovar. É com esta data que o seu prazo é medido.</div></div>';
 }
 /* Parte do comercial: o preço vem depois do orçamento técnico. O comercial
    busca peças (tipo P) e mão de obra/serviços (tipo S) no cadastro do Bling,
@@ -1011,9 +1045,7 @@ var IT=[];
 function precoFormHtml(o){
   var q=o.orcamento||{};
   IT=(q.itens||[]).map(function(x){return{tipo:x.tipo==='S'?'S':'P',id:x.id,nome:x.nome,codigo:x.codigo,qtd:x.qtd,valor:x.valor};});
-  var pzE=(o.prazos&&o.prazos.entrega)||maisDias(3);
   return'<div class="field"><label>Responsável comercial <span class="req">*</span></label><input id="ps-com" value="'+esc(o.comercial||lerLocal('comercial'))+'"/></div>'
-    +'<div class="field"><label>Previsão de término do serviço (passe ao cliente junto com o orçamento) <span class="req">*</span></label><input type="date" id="ps-termino" value="'+pzE+'"/></div>'
     +(o.blingId?'':'<div class="info">Esta OS não está ligada ao Bling (o número foi digitado à mão). Os itens ficam só no app.</div>')
     +'<div class="sec">Peças e serviços</div>'
     +'<div id="it-lista"></div>'
@@ -1068,13 +1100,12 @@ function corpoBling(lista){
 /* Lê os itens do formulário, lança no Bling (se a OS veio de lá) e devolve os
    campos do orçamento a gravar. Devolve false quando o usuário desiste. */
 async function salvarItens(o){
-  var com=val('ps-com'),termino=val('ps-termino');
+  var com=val('ps-com');
   if(!com){psErro('Informe o responsável comercial.');return false;}
-  if(!termino){psErro('Informe a previsão de término do serviço.');return false;}
   var itens=IT.map(function(x){return{tipo:x.tipo,id:x.id,nome:x.nome,codigo:x.codigo||'',qtd:x.qtd,valor:Math.round(x.valor*100)/100};});
   if(!itens.length){psErro('Adicione pelo menos uma peça ou serviço.');return false;}
   if(itens.some(function(x){return!(x.qtd>0);})){psErro('Quantidade precisa ser maior que zero.');return false;}
-  var pc=itSoma('P'),mo=itSoma('S'),r={comercial:com,termino:termino,itens:itens,valorPecas:pc,maoObra:mo,total:pc+mo,blingLancadoEm:null,blingErro:''};
+  var pc=itSoma('P'),mo=itSoma('S'),r={comercial:com,itens:itens,valorPecas:pc,maoObra:mo,total:pc+mo,blingLancadoEm:null,blingErro:''};
   gravarLocal('comercial',com);
   if(o.blingId){
     $('ps-ok').textContent='Lançando no Bling…';
@@ -1109,7 +1140,8 @@ function resumoTecnico(o){
     +'<dt>Técnico</dt><dd>'+esc(o.tecnicoOrc||'-')+'</dd>'
     +'<dt>Diagnóstico</dt><dd>'+esc(q.diagnostico||'-')+'</dd>'
     +(q.servicos?'<dt>Serviços</dt><dd>'+esc(q.servicos)+'</dd>':'')
-    +'<dt>Peças</dt><dd>'+esc(q.pecas||'Nenhuma')+'</dd></dl></div>';
+    +'<dt>Peças</dt><dd>'+esc(q.pecas||'Nenhuma')+'</dd>'
+    +'<dt>Término previsto</dt><dd>'+fmtData(o.prazos&&o.prazos.entrega)+' <span class="sub">(definido pelo técnico)</span></dd></dl></div>';
 }
 function precificar(id){
   var o=getOS(id);
@@ -1121,7 +1153,6 @@ function precificar(id){
     var noFluxo=o.etapa==='aguardando_preco';
     var upd=noFluxo?{etapa:'aguardando_aprovacao','tempos.precificado':Date.now(),comercial:r.comercial}:{comercial:r.comercial,'orcamento.precificadoEm':Date.now()};
     ['itens','valorPecas','maoObra','total','blingLancadoEm','blingErro'].forEach(function(k){upd['orcamento.'+k]=r[k];});
-    upd['prazos.entrega']=r.termino;
     await avancar(id,upd,(r.blingLancadoEm?'Itens lançados no Bling':'Preço salvo')+(noFluxo?' — passe ao cliente':''));
   });
   renderItens();
@@ -1133,9 +1164,10 @@ function finalizarOrc(id){
     orcFormHtml(o)
     +midiaFormHtml('Fotos mostrando o problema',true,true),
     'Finalizar orçamento',async function(){
-      var tec=val('ps-tec'),diag=val('ps-diag');
+      var tec=val('ps-tec'),diag=val('ps-diag'),termino=val('ps-termino');
       if(!tec){psErro('Escolha o técnico.');return false;}
       if(!diag){psErro('Escreva o diagnóstico.');return false;}
+      if(!termino){psErro('Informe a previsão de término do serviço.');return false;}
       if(!F.fotos.length){psErro('Tire pelo menos 1 foto mostrando o problema.');return false;}
       if(F.enviandoVideo){psErro('Espere o vídeo terminar de enviar.');return false;}
       $('ps-ok').textContent='Salvando fotos…';
@@ -1143,7 +1175,7 @@ function finalizarOrc(id){
       catch(e){psErro('Erro ao salvar as fotos: '+e.message);$('ps-ok').textContent='Finalizar orçamento';throw e;}
       var nm=(o.midias||{});nm.problema=(nm.problema||0)+F.fotos.length+F.videos.length;
       F.fotos=[];F.videos=[];
-      await avancar(id,{etapa:'aguardando_preco','tempos.orcFim':Date.now(),tecnicoOrc:tec,midias:nm,
+      await avancar(id,{etapa:'aguardando_preco','tempos.orcFim':Date.now(),tecnicoOrc:tec,midias:nm,'prazos.entrega':termino,
         orcamento:{diagnostico:diag,servicos:val('ps-serv'),pecas:val('ps-pecas')}},'Orçamento técnico finalizado — vai para o comercial');
     });
   renderMidiaForm();
@@ -1163,7 +1195,8 @@ function editarDiag(id){
       if(!tec){psErro('Escolha o técnico.');return false;}
       if(!diag){psErro('Escreva o diagnóstico.');return false;}
       if(F.enviandoVideo){psErro('Espere o vídeo terminar de enviar.');return false;}
-      var upd={tecnicoOrc:tec,'orcamento.diagnostico':diag,'orcamento.servicos':val('ps-serv'),'orcamento.pecas':val('ps-pecas'),'orcamento.diagEditadoEm':Date.now()};
+      if(!val('ps-termino')){psErro('Informe a previsão de término do serviço.');return false;}
+      var upd={tecnicoOrc:tec,'prazos.entrega':val('ps-termino'),'orcamento.diagnostico':diag,'orcamento.servicos':val('ps-serv'),'orcamento.pecas':val('ps-pecas'),'orcamento.diagEditadoEm':Date.now()};
       var novas=F.fotos.length+F.videos.length;
       if(novas){
         $('ps-ok').textContent='Salvando fotos…';
@@ -1188,7 +1221,7 @@ function editarOrc(id){
     var ant=o.orcamento||{},r=await salvarItens(o);if(!r)return false;
     var hist=(ant.historico||[]).slice();
     if(Math.abs((ant.total||0)-r.total)>0.001)hist.push({em:Date.now(),de:ant.total||0,para:r.total});
-    var upd={comercial:r.comercial,'orcamento.historico':hist,'orcamento.editadoEm':Date.now(),'prazos.entrega':r.termino};
+    var upd={comercial:r.comercial,'orcamento.historico':hist,'orcamento.editadoEm':Date.now()};
     ['itens','valorPecas','maoObra','total','blingLancadoEm','blingErro'].forEach(function(k){upd['orcamento.'+k]=r[k];});
     await avancar(id,upd,r.blingLancadoEm?'Preço atualizado e relançado no Bling':'Preço atualizado');
   });
@@ -1196,18 +1229,23 @@ function editarOrc(id){
 }
 function clienteInformado(id){
   passoSimples('Orçamento passado ao cliente',
-    '<div class="field"><label>Quem informou <span class="req">*</span></label><input id="ps-quem" value="'+esc(lerLocal('comercial')||lerLocal('atendente'))+'"/></div>'
+    '<div class="field"><label>Data e hora do envio ao cliente <span class="req">*</span></label><input type="datetime-local" id="ps-quando" value="'+toLocalInput(Date.now())+'"/></div>'
+    +'<div class="field"><label>Quem informou <span class="req">*</span></label><input id="ps-quem" value="'+esc(lerLocal('comercial')||lerLocal('atendente'))+'"/></div>'
     +'<div class="field"><label>Como</label><select id="ps-como"><option>WhatsApp</option><option>Ligação</option><option>Pessoalmente</option><option>Outro</option></select></div>',
-    'Registrar agora',async function(){
+    'Registrar envio',async function(){
       var q=val('ps-quem');if(!q){psErro('Informe quem passou o orçamento.');return false;}
-      await avancar(id,{'tempos.informado':Date.now(),informadoPor:q,informadoComo:val('ps-como')},'Registrado — aguardando resposta do cliente');
+      var ms=new Date(val('ps-quando')).getTime(),t=getOS(id).tempos||{};
+      if(!val('ps-quando')||isNaN(ms)){psErro('Informe a data e hora do envio.');return false;}
+      if(ms>Date.now()+60000){psErro('A data de envio não pode ser no futuro.');return false;}
+      if(t.precificado&&ms<t.precificado-60000){psErro('O envio não pode ser antes do preço definido ('+fmtDH(t.precificado)+').');return false;}
+      await avancar(id,{'tempos.informado':ms,informadoPor:q,informadoComo:val('ps-como')},'Registrado — aguardando resposta do cliente');
     });
 }
 function respostaCliente(id,aprovou){
   passoSimples(aprovou?'Cliente aprovou o orçamento':'Cliente não aprovou',
     (aprovou?((getOS(id).prazos||{}).entrega
-      ?'<div class="info">Previsão de término informada pelo comercial: <b>'+fmtData(getOS(id).prazos.entrega)+'</b>. Para mudar, use "Alterar prazos" na OS.</div>'
-      :'<div class="field"><label>Previsão de término (o comercial não definiu) <span class="req">*</span></label><input type="date" id="ps-prazo" value="'+maisDias(3)+'"/></div>'):'')
+      ?'<div class="info">Previsão de término (definida pelo técnico): <b>'+fmtData(getOS(id).prazos.entrega)+'</b>. Para mudar, use "Alterar prazos" na OS.</div>'
+      :'<div class="field"><label>Previsão de término (o técnico não definiu) <span class="req">*</span></label><input type="date" id="ps-prazo" value="'+maisDias(3)+'"/></div>'):'')
     +'<div class="field"><label>Observação (opcional)</label><textarea id="ps-obs" rows="2" placeholder="'+(aprovou?'Ex: pediu urgência':'Ex: achou caro, vai comprar um novo')+'"></textarea></div>',
     'Confirmar',async function(){
       var agora=Date.now(),upd={etapa:aprovou?'aprovado':'devolver','tempos.resposta':agora,aprovado:aprovou,obsResposta:val('ps-obs')};
@@ -1244,13 +1282,17 @@ function finalizarServ(id){
       catch(e){psErro('Erro ao salvar as fotos: '+e.message);$('ps-ok').textContent='Finalizar serviço';throw e;}
       var nm=(o.midias||{});nm.funcionando=(nm.funcionando||0)+F.fotos.length+F.videos.length;
       F.fotos=[];F.videos=[];
-      await avancar(id,{etapa:'pronto','tempos.servFim':Date.now(),tecnico:tec,midias:nm,servico:{obs:val('ps-obs')}},'Serviço finalizado — avise o cliente');
+      var fim=Date.now();
+      await avancar(id,{etapa:'pronto','tempos.servFim':fim,tecnico:tec,midias:nm,servico:{obs:val('ps-obs')}},'Serviço finalizado — avise o cliente');
+      datasBling(id,{dataConclusao:isoDia(new Date(fim))});
     });
   renderMidiaForm();
 }
 function entregar(id){
   passoSimples('Entregar ao cliente','<div class="info">Confirme que o aparelho foi entregue ao cliente.</div>','Confirmar entrega',async function(){
-    await avancar(id,{etapa:'entregue','tempos.entregue':Date.now()},'OS encerrada');
+    var ent=Date.now();
+    await avancar(id,{etapa:'entregue','tempos.entregue':ent},'OS encerrada');
+    datasBling(id,{dataSaida:isoDia(new Date(ent))});
   });
 }
 /* Apaga a OS do app (com fotos e vídeos) e, se marcado, também no Bling. */
@@ -1300,6 +1342,8 @@ function ajustarHora(id,k){
       var upd={};upd['tempos.'+k]=ms;
       if(k==='recebido')upd.criadoEm=ms;
       await avancar(id,upd,'Horário ajustado');
+      if(k==='servFim')datasBling(id,{dataConclusao:isoDia(new Date(ms))});
+      if(k==='entregue')datasBling(id,{dataSaida:isoDia(new Date(ms))});
     });
 }
 function editarRecepcao(id){
@@ -1666,17 +1710,25 @@ function vPainel(){
     var d=duracoes(o);
     if(o.tecnicoOrc&&d.orcamento!=null){(tecs[o.tecnicoOrc]=tecs[o.tecnicoOrc]||{orc:[],exe:[]}).orc.push(d.orcamento);}
     if(o.tecnico&&d.execucao!=null){(tecs[o.tecnico]=tecs[o.tecnico]||{orc:[],exe:[]}).exe.push(d.execucao);}
+    /* Prazo do técnico: terminou o serviço até a data que ele mesmo previu? */
+    if(o.tecnico&&o.tempos.servFim&&o.prazos&&o.prazos.entrega){var tt=(tecs[o.tecnico]=tecs[o.tecnico]||{orc:[],exe:[]});tt.pz=(tt.pz||0)+1;if(o.tempos.servFim<=fimDoDia(o.prazos.entrega))tt.ok=(tt.ok||0)+1;}
   });
   var nt=Object.keys(tecs).sort();
-  h+='<div class="card"><h3>Por técnico</h3>'+(nt.length?'<div class="tw"><table><thead><tr><th>Técnico</th><th>Orçamentos</th><th>Tempo médio orçamento</th><th>Serviços</th><th>Tempo médio execução</th></tr></thead><tbody>'
-    +nt.map(function(n){var x=tecs[n];return'<tr><td><b>'+esc(n)+'</b></td><td>'+x.orc.length+'</td><td>'+fmtDur(media(x.orc))+'</td><td>'+x.exe.length+'</td><td>'+fmtDur(media(x.exe))+'</td></tr>';}).join('')
+  h+='<div class="card"><h3>Por técnico</h3>'+(nt.length?'<div class="tw"><table><thead><tr><th>Técnico</th><th>Orçamentos</th><th>Tempo médio orçamento</th><th>Serviços</th><th>Tempo médio execução</th><th>Serviços no prazo</th></tr></thead><tbody>'
+    +nt.map(function(n){var x=tecs[n];return'<tr><td><b>'+esc(n)+'</b></td><td>'+x.orc.length+'</td><td>'+fmtDur(media(x.orc))+'</td><td>'+x.exe.length+'</td><td>'+fmtDur(media(x.exe))+'</td><td>'+(x.pz?Math.round((x.ok||0)/x.pz*100)+'% ('+(x.ok||0)+' de '+x.pz+')':'-')+'</td></tr>';}).join('')
     +'</tbody></table></div>':'<div class="sub">Ainda sem orçamentos ou serviços finalizados no período.</div>')+'</div>';
+  /* Comercial: do orçamento técnico pronto até o preço, e até o envio ao cliente. */
   var coms={};
-  per.forEach(function(o){var d=duracoes(o);if(o.comercial&&d.preco!=null)(coms[o.comercial]=coms[o.comercial]||[]).push(d.preco);});
+  per.forEach(function(o){
+    var d=duracoes(o),t=o.tempos||{};if(!o.comercial)return;
+    var c=coms[o.comercial]=coms[o.comercial]||{preco:[],envio:[]};
+    if(d.preco!=null)c.preco.push(d.preco);
+    if(t.orcFim&&t.informado)c.envio.push(t.informado-t.orcFim);
+  });
   var nc=Object.keys(coms).sort();
-  h+='<div class="card"><h3>Por comercial</h3>'+(nc.length?'<div class="tw"><table><thead><tr><th>Comercial</th><th>Orçamentos precificados</th><th>Tempo médio p/ colocar preço</th></tr></thead><tbody>'
-    +nc.map(function(n){return'<tr><td><b>'+esc(n)+'</b></td><td>'+coms[n].length+'</td><td>'+fmtDur(media(coms[n]))+'</td></tr>';}).join('')
-    +'</tbody></table></div>':'<div class="sub">Ainda sem orçamentos precificados no período.</div>')+'</div>';
+  h+='<div class="card"><h3>Por comercial</h3>'+(nc.length?'<div class="tw"><table><thead><tr><th>Comercial</th><th>Orçamentos precificados</th><th>Tempo médio p/ colocar preço</th><th>Tempo médio até enviar ao cliente</th></tr></thead><tbody>'
+    +nc.map(function(n){var c=coms[n];return'<tr><td><b>'+esc(n)+'</b></td><td>'+c.preco.length+'</td><td>'+fmtDur(media(c.preco))+'</td><td>'+fmtDur(media(c.envio))+'</td></tr>';}).join('')
+    +'</tbody></table></div><div class="hint">Os tempos contam a partir de quando o técnico finalizou o orçamento.</div>':'<div class="sub">Ainda sem orçamentos precificados no período.</div>')+'</div>';
   /* Paradas */
   h+='<div class="card"><h3>OS paradas há mais tempo que o normal</h3>'+(paradas.length?'<div class="tw"><table><thead><tr><th>OS</th><th>Cliente</th><th>Etapa</th><th>Há</th></tr></thead><tbody>'
     +paradas.map(function(o){return'<tr style="cursor:pointer" onclick="abrirOS(\''+o.id+'\')"><td><b>'+esc(o.numero||'-')+'</b></td><td>'+esc(o.cliente&&o.cliente.nome||'-')+'</td><td>'+etapaBadge(o.etapa)+'</td><td class="late">'+fmtDur(desdeEtapa(o))+'</td></tr>';}).join('')
