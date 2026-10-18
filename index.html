@@ -87,6 +87,7 @@ main{max-width:1100px;margin:0 auto;padding:16px 16px 96px;}
 .it-x{background:none;border:none;color:var(--red);font-size:18px;padding-bottom:6px;}
 .it-total{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;background:var(--blue-light);color:var(--blue-dark);border-radius:var(--r2);padding:10px 12px;margin:12px 0;font-size:13px;}
 .it-total b{font-size:16px;}
+.btn-del{background:#fff;color:var(--red);border:1px solid var(--red);}
 .b-orange{background:#fdeedd;color:#b45309;}
 .b-gray{background:#eef0f3;color:var(--text2);}
 .late{color:var(--red);font-weight:700;}
@@ -714,7 +715,7 @@ function detalheHtml(o,midias){
       +(o.servico.obs?'<dt>O que foi feito</dt><dd>'+esc(o.servico.obs)+'</dd>':'')
       +'</dl><div class="sec">Aparelho funcionando (fotos e vídeo)</div>'+(midias?galeria(midias,'funcionando'):'<div class="sub">Carregando…</div>')+'</div>';
   }
-  h+='<div style="display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap;margin-top:6px;"><button class="btn btn-p btn-sm" onclick="relatorioEntrada(\''+o.id+'\')">📄 Relatório de entrada</button><button class="btn btn-g btn-sm" onclick="editarRecepcao(\''+o.id+'\')">Editar dados da recepção</button></div>';
+  h+='<div style="display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap;margin-top:6px;"><button class="btn btn-p btn-sm" onclick="relatorioEntrada(\''+o.id+'\')">📄 Relatório de entrada</button><button class="btn btn-g btn-sm" onclick="editarRecepcao(\''+o.id+'\')">Editar dados da recepção</button><button class="btn btn-sm btn-del" onclick="apagarOS(\''+o.id+'\')">🗑 Apagar OS</button></div>';
   return h;
 }
 function acoesHtml(o){
@@ -1004,6 +1005,39 @@ function entregar(id){
   passoSimples('Entregar ao cliente','<div class="info">Confirme que o aparelho foi entregue ao cliente.</div>','Confirmar entrega',async function(){
     await avancar(id,{etapa:'entregue','tempos.entregue':Date.now()},'OS encerrada');
   });
+}
+/* Apaga a OS do app (com fotos e vídeos) e, se marcado, também no Bling. */
+function apagarOS(id){
+  var o=getOS(id);if(!o)return;
+  passoSimples('Apagar '+esc(osLabel(o)),
+    '<div class="err">Isto apaga a OS de <b>'+esc(o.cliente&&o.cliente.nome||'-')+'</b> ('+esc(aparelho(o))+'), com todas as fotos, vídeos e horários. Não dá para desfazer.</div>'
+    +(o.blingId?'<label style="display:flex;gap:8px;align-items:center;margin-bottom:12px;font-size:14px;"><input type="checkbox" id="ps-bling" checked style="width:20px;height:20px;"/> Apagar também a OS nº '+esc(o.numero||'')+' no Bling</label>'
+      :'<div class="hint" style="margin-bottom:12px;">Esta OS não está ligada ao Bling; só o app é apagado.</div>'),
+    'Apagar definitivamente',async function(){
+      var b=$('ps-ok');
+      if(o.blingId&&$('ps-bling').checked){
+        b.textContent='Apagando no Bling…';
+        try{
+          var r=await fetch(API+'/api/bling/os/'+o.blingId,{method:'DELETE'});
+          var j=await r.json().catch(function(){return{};});
+          if(!r.ok)throw new Error(j.error||('HTTP '+r.status));
+        }catch(e){
+          if(!confirm('Não foi possível apagar no Bling:\n'+e.message+'\n\nApagar só no app?')){b.textContent='Apagar definitivamente';return false;}
+        }
+      }
+      b.textContent='Apagando…';
+      try{
+        var ms=await carregarMidias(id);
+        for(var i=0;i<ms.length;i++){
+          if(ms[i].url&&storage){try{await storage.refFromURL(ms[i].url).delete();}catch(e){}}
+          await db.collection(C_MID).doc(ms[i].id).delete();
+        }
+        await db.collection(C_OS).doc(id).delete();
+      }catch(e){psErro('Erro ao apagar: '+e.message);b.textContent='Apagar definitivamente';throw e;}
+      S.abertaId=null;fecharModal();toast(osLabel(o)+' apagada');
+      return false;
+    });
+  $('ps-ok').className='btn btn-no';
 }
 var NOMES_T={recebido:'Entrada na loja',orcIni:'Início do orçamento',orcFim:'Fim do orçamento',precificado:'Preço do comercial',resposta:'Resposta do cliente',servIni:'Início do serviço',servFim:'Fim do serviço',entregue:'Entrega'};
 var ORDEM_T=['recebido','orcIni','orcFim','precificado','resposta','servIni','servFim','entregue'];
