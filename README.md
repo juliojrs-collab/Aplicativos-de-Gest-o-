@@ -1,6 +1,6 @@
-# Oficina Purific
+# Aplicativo - Manutenção Interna
 
-Controle das OS de purificadores recebidos na loja: recepção no balcão, orçamento
+Aplicativo - Manutenção Interna (https://manutencao-interna.netlify.app). Controle das OS de purificadores recebidos na loja: recepção no balcão, orçamento
 e serviço na oficina, fotos/vídeos de cada etapa e medição do tempo de cada etapa.
 
 - `index.html` — o app inteiro (hospedado no Netlify).
