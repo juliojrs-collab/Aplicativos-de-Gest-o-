@@ -584,7 +584,9 @@ function vLista(){
     return [o.numero,o.cliente&&o.cliente.nome,o.cliente&&o.cliente.telefone,o.marca,o.modelo,o.cor,o.nSerie].join(' ').toLowerCase().indexOf(q)>=0;
   });
   var h='<div class="ph"><div><h2>Ordens de serviço</h2><p class="sub">'+S.os.filter(FILTROS[0].f).length+' abertas · '+S.os.length+' no total</p></div>'
-    +'<button class="btn btn-g btn-sm" onclick="importarBling()">⬇ Importar do Bling</button></div>';
+    /* Botão "Importar do Bling" fora da tela a pedido da loja (começaram do
+       zero). A função importarBling() continua no código para uso futuro. */
+    +'</div>';
   h+='<input class="search" id="busca" placeholder="Buscar por nº da OS, cliente, telefone, modelo…" value="'+esc(S.busca)+'" oninput="S.busca=this.value;S._focoBusca=true;render()"/>';
   h+='<div class="chips">'+FILTROS.map(function(x){
     var n=S.os.filter(x.f).length;
