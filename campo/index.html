@@ -55,6 +55,9 @@ main{max-width:760px;margin:0 auto;padding:14px 14px 96px;}
 .hint{font-size:12px;color:var(--text3);margin-top:4px;}
 .chips{display:flex;gap:6px;overflow-x:auto;padding-bottom:4px;margin-bottom:10px;}
 .chip{border:1px solid var(--border2);background:#fff;border-radius:20px;padding:7px 12px;font-size:13px;white-space:nowrap;font-weight:600;color:var(--text2);}
+.opts{display:flex;flex-wrap:wrap;gap:6px;}
+.opts .chip{white-space:normal;}
+.chip:disabled{opacity:.6;}
 .chip.on{border-color:var(--blue);background:var(--blue-light);color:var(--blue-dark);}
 .search{width:100%;border:1px solid var(--border2);border-radius:var(--r2);padding:11px 12px;font-size:16px;margin-bottom:10px;background:#fff;}
 .os{display:flex;gap:12px;align-items:flex-start;cursor:pointer;}
@@ -134,6 +137,13 @@ var FB_CFG={
 var API='https://whatsapp-crm-production-66bf.up.railway.app';
 var C_LOC='campo_localizacoes',C_REG='campo_pedidos',C_MID='campo_midias',C_TEC='campo_tecnicos';
 var MAX_FOTOS=8;
+/* Perguntas obrigatórias do atendimento: respondidas antes da assinatura e
+   impressas no PDF. A observação de cada uma é opcional. */
+var CHECK=[
+  {k:'higienizacao',p:'O aparelho precisa de higienização?',o:['Sim','Não','Feita neste atendimento'],obs:'Observação (opcional)'},
+  {k:'pressao',p:'Qual a pressão do local?',o:['Baixa','Normal','Alta','Não foi possível medir'],obs:'Valor medido ou observação (opcional)'},
+  {k:'mangueiras',p:'As mangueiras estão ressecadas ou foram trocadas há mais de um ano?',o:['Sim','Não','Trocadas neste atendimento','Não verificado'],obs:'Observação (opcional)'}
+];
 var TERMO='Declaro que recebi nesta data os produtos e/ou serviços descritos neste pedido, nas condições registradas acima.';
 
 /* ═══ Estado ═════════════════════════════════════════════════════════════ */
@@ -363,6 +373,7 @@ function renderPedido(){
     +S.midias.map(function(m){return'<div class="ph-t"><img src="'+m.data+'"/>'+(assinado?'':'<button class="x" onclick="rmFoto(\''+m.id+'\')">✕</button>')+'</div>';}).join('')
     +'</div>'+(assinado?'':'<div class="addbar"><button class="btn btn-g" onclick="addFoto(true)">📷 Tirar foto</button><button class="btn btn-g" onclick="addFoto(false)">🖼 Galeria</button></div>')
     +'<div class="sub" id="foto-st"></div></div>'
+    +checkHtml(r.checklist||{},assinado)
     +'<div class="field"><label>Observações do técnico</label><textarea id="obs" rows="4" placeholder="O que foi entregue/instalado, pendências…"'+trava+' onchange="salvarCampos()">'+esc(r.obs||'')+'</textarea></div>'
     +'<div class="g2"><div class="field"><label>Quem recebeu / assinou <span class="req">*</span></label><input id="rec-nome" value="'+esc(r.recebedor?r.recebedor.nome:(c.nome||''))+'"'+trava+' onchange="salvarCampos()"/></div>'
     +'<div class="field"><label>Documento (CPF ou RG)</label><input id="rec-doc" inputmode="numeric" value="'+esc(r.recebedor?r.recebedor.doc:'')+'"'+trava+' onchange="salvarCampos()"/></div></div>'
@@ -390,6 +401,28 @@ function renderPedido(){
   h+='</div>';
   $('app').innerHTML=h;
 }
+function checkHtml(ck,trava){
+  return CHECK.map(function(q,i){
+    var a=ck[q.k]||{};
+    return'<div class="field" id="ck-'+q.k+'"><label>'+(i+1)+'. '+esc(q.p)+' <span class="req">*</span></label><div class="opts">'
+      +q.o.map(function(op){return'<button type="button" class="chip'+(a.r===op?' on':'')+'"'+(trava?' disabled':'')+' data-v="'+esc(op)+'" onclick="ckSel(\''+q.k+'\',this)">'+esc(op)+'</button>';}).join('')
+      +'</div><input id="ck-'+q.k+'-obs" placeholder="'+esc(q.obs)+'" style="margin-top:6px;font-size:14px;" value="'+esc(a.obs||'')+'"'+(trava?' disabled':'')+' onchange="salvarCampos()"/></div>';
+  }).join('');
+}
+function ckSel(k,btn){
+  Array.prototype.forEach.call(btn.parentNode.children,function(b){b.classList.toggle('on',b===btn);});
+  salvarCampos();
+}
+/* Lê as respostas do que está na tela. */
+function ckLer(){
+  var ck={};
+  CHECK.forEach(function(q){
+    var box=$('ck-'+q.k);if(!box)return;
+    var on=box.querySelector('.chip.on');
+    ck[q.k]={p:q.p,r:on?on.getAttribute('data-v'):'',obs:val('ck-'+q.k+'-obs')};
+  });
+  return ck;
+}
 function itensHtml(o){
   var its=o.itens||[];
   if(!its.length)return'';
@@ -412,6 +445,7 @@ function regBase(){
 function salvarCampos(extra){
   var r=regBase();
   if($('obs'))r.obs=val('obs');
+  if($('ck-'+CHECK[0].k))r.checklist=ckLer();
   if($('rec-nome'))r.recebedor={nome:val('rec-nome'),doc:val('rec-doc')};
   if(extra)for(var k in extra)r[k]=extra[k];
   var id=String(S.ped.id);
@@ -475,6 +509,11 @@ function rmFoto(id){
    em vez de desenhar). Na confirmação gravamos hora e GPS do aparelho. */
 var SIG=null;
 function assinar(){
+  var ck=ckLer(),falta=CHECK.filter(function(q){return!ck[q.k]||!ck[q.k].r;});
+  if(falta.length){
+    toast(falta.length===1?'Responda a pergunta '+(CHECK.indexOf(falta[0])+1)+' antes da assinatura':'Responda as perguntas '+falta.map(function(q){return CHECK.indexOf(q)+1;}).join(', ')+' antes da assinatura');
+    $('ck-'+falta[0].k).scrollIntoView({behavior:'smooth',block:'center'});return;
+  }
   var nome=val('rec-nome');
   if(!nome){toast('Preencha quem está recebendo/assinando');$('rec-nome').focus();return;}
   salvarCampos();
@@ -694,6 +733,17 @@ async function montarPdf(){
     if(o.total){chk(8);y+=2;doc.setFont('helvetica','bold');doc.text('Total: '+money(o.total),MR-2,y,{align:'right'});y+=6;}
   }
   if(o.observacoes){section('Observações do pedido');texto(o.observacoes);}
+  var ck=r.checklist||{};
+  if(CHECK.some(function(q){return ck[q.k]&&ck[q.k].r;})){
+    section('Verificações do técnico');
+    CHECK.forEach(function(q,i){
+      var a=ck[q.k];if(!a||!a.r)return;
+      var lq=doc.splitTextToSize((i+1)+'. '+q.p,MR-ML-4),la=doc.splitTextToSize(a.r+(a.obs?' — '+a.obs:''),MR-ML-10);
+      chk((lq.length+la.length)*4.5+2);
+      doc.setFont('helvetica','bold');doc.text(lq,ML+2,y);y+=lq.length*4.5;
+      doc.setFont('helvetica','normal');doc.text(la,ML+8,y);y+=la.length*4.5+1.5;
+    });
+  }
   if(r.obs){section('Observações do técnico');texto(r.obs);}
   var fotos=S.midias.filter(function(m){return m.data;});
   if(fotos.length){
