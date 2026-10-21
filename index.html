@@ -187,6 +187,7 @@ th{font-size:11px;color:var(--text2);text-transform:uppercase;}
 </div>
 <main id="app"><div class="empty">Carregando…</div></main>
 <div id="modal"></div>
+<datalist id="vendedores"></datalist>
 <datalist id="cores"><option>Branco</option><option>Preto</option><option>Prata</option><option>Inox</option><option>Cinza</option><option>Grafite</option><option>Azul</option><option>Vermelho</option></datalist>
 <script>
 /* ═══ Configuração ════════════════════════════════════════════════════════
@@ -801,6 +802,7 @@ function colherAssinatura(id){
 var NV={};
 function novaOS(){
   S.modo='nova';
+  carregarClientes();if(!VENDEDORES.length)carregarVendedores();
   NV={contato:null,chave:uid(),manual:false};
   resetMidiaForm('entrada',6,0);
   var cond=CONDICOES.map(function(c){return'<option>'+esc(c)+'</option>';}).join('');
@@ -818,7 +820,8 @@ function novaOS(){
     +'<div class="sec">O que o cliente falou</div>'
     +'<div class="field"><label>Problema relatado <span class="req">*</span></label><textarea id="nv-prob" rows="3"></textarea></div>'
     +'<div class="sec">Questionário de entrada</div>'+questHtml('nv',null)
-    +'<div class="field"><label>Atendente</label><input id="nv-atend" value="'+esc(lerLocal('atendente'))+'"/></div>'
+    +'<div class="field"><label>Vendedor que recebeu o aparelho <span class="req">*</span></label><input id="nv-atend" list="vendedores" autocomplete="off" placeholder="Digite o nome do vendedor" value="'+esc(lerLocal('atendente'))+'"/>'
+    +'<div class="hint">Os vendedores vêm do cadastro do Bling. A OS é aberta lá com este vendedor.</div></div>'
     +'<div class="sec">Como o aparelho chegou</div>'
     +midiaFormHtml('Fotos de entrada (até 6)',false,true)
     +'<div class="sec">Assinatura do cliente</div>'
@@ -833,6 +836,14 @@ function novaOS(){
 }
 function lerLocal(k){try{return localStorage.getItem('oficina_'+k)||'';}catch(e){return'';}}
 function gravarLocal(k,v){try{localStorage.setItem('oficina_'+k,v);}catch(e){}}
+var VENDEDORES=[];
+function carregarVendedores(){
+  return fetch(API+'/api/bling/vendedores-ativos').then(function(r){return r.json();}).then(function(j){
+    VENDEDORES=(j&&j.vendedores)||[];
+    var dl=$('vendedores');if(dl)dl.innerHTML=VENDEDORES.map(function(v){return'<option value="'+esc(v.nome)+'"></option>';}).join('');
+  }).catch(function(){});
+}
+function acharVendedor(nome){var n=normBusca(nome).trim();if(!n)return null;return VENDEDORES.filter(function(v){return normBusca(v.nome).trim()===n;})[0]||null;}
 function renderCliente(){
   var el=$('nv-cli');if(!el)return;
   if(NV.contato){
@@ -841,30 +852,72 @@ function renderCliente(){
       +'<div class="field"><label>Telefone para contato</label><input id="nv-tel" value="'+esc(NV.contato.telefone||'')+'"/></div>';
     return;
   }
-  el.innerHTML='<div class="field"><label>Buscar cliente no Bling</label><input id="nv-busca" placeholder="Nome, CPF ou celular" oninput="buscarCliente(this.value)" autocomplete="off"/></div>'
+  el.innerHTML='<div class="field"><label>Buscar cliente cadastrado</label><input id="nv-busca" placeholder="Nome, CPF ou celular" oninput="buscarCliente(this.value)" autocomplete="off"/>'
+    +(CLIENTES.length?'':'<div class="hint">Carregando a lista de clientes… enquanto isso a busca vai direto no Bling.</div>')+'</div>'
     +'<div id="nv-sug"></div>'
     +'<div class="hint" style="margin:-6px 0 10px;">Não achou? Preencha abaixo que o cliente é cadastrado no Bling junto com a OS.</div>'
     +'<div class="field"><label>Nome do cliente <span class="req">*</span></label><input id="nv-nome"/></div>'
     +'<div class="g2"><div class="field"><label>Celular <span class="req">*</span></label><input id="nv-tel" inputmode="tel" placeholder="(00) 00000-0000"/></div>'
     +'<div class="field"><label>CPF/CNPJ</label><input id="nv-doc" inputmode="numeric"/></div></div>';
 }
+/* Busca de cliente: a lista de todos os clientes do Bling fica guardada no
+   aparelho (renovada a cada hora) e a busca é feita aqui mesmo, na hora.
+   Se não achar, o botão "Buscar direto no Bling" consulta o Bling ao vivo. */
+var CLIENTES=[],CLI_EM=0,_cliCarregando=null;
+function normBusca(t){return String(t||'').normalize('NFD').replace(/[̀-ͯ]/g,'').toLowerCase();}
+function soDig(t){return String(t||'').replace(/\D/g,'');}
+function prepararClientes(lista){
+  CLIENTES=lista.map(function(c){return{id:c[0],nome:c[1],documento:c[2],telefone:c[3],_n:normBusca(c[1]),_d:soDig(c[2])+' '+soDig(c[3])};});
+}
+function carregarClientes(forcar){
+  if(!forcar&&CLIENTES.length&&Date.now()-CLI_EM<3600000)return Promise.resolve();
+  if(_cliCarregando)return _cliCarregando;
+  _cliCarregando=fetch(API+'/api/bling/os/clientes').then(function(r){return r.json();}).then(function(j){
+    if(!j||!j.clientes)return;
+    prepararClientes(j.clientes);CLI_EM=Date.now();
+    try{localStorage.setItem('oficina_clientes_v1',JSON.stringify({em:CLI_EM,c:j.clientes}));}catch(e){}
+  }).catch(function(){}).then(function(){_cliCarregando=null;});
+  return _cliCarregando;
+}
+(function(){try{var x=JSON.parse(localStorage.getItem('oficina_clientes_v1')||'null');if(x&&x.c){prepararClientes(x.c);CLI_EM=x.em||0;}}catch(e){}})();
+function buscarLocal(q){
+  var dig=soDig(q),termos=normBusca(q).split(/\s+/).filter(Boolean),out=[];
+  for(var i=0;i<CLIENTES.length&&out.length<20;i++){
+    var c=CLIENTES[i],ok;
+    if(dig.length>=4&&dig.length===q.replace(/[\s().\/-]/g,'').length)ok=c._d.indexOf(dig)>=0;
+    else ok=termos.every(function(t){return c._n.indexOf(t)>=0;});
+    if(ok)out.push(c);
+  }
+  return out;
+}
+function mostrarSugestoes(lista,q,origem){
+  var box=$('nv-sug');if(!box)return;
+  NV._sug=lista;
+  box.innerHTML=(lista.length?'<div class="sug">'+lista.map(function(c,i){
+      return'<div onclick="escolherCliente('+i+')"><b>'+esc(c.nome)+'</b><br><small>'+esc([c.telefone,c.documento].filter(Boolean).join(' · ')||'—')+'</small></div>';
+    }).join('')+'</div>':'<div class="hint" style="margin:-6px 0 6px;">Nenhum cliente encontrado'+(origem==='bling'?' no Bling':'')+'.</div>')
+    +(origem==='local'?'<button type="button" class="btn btn-g btn-sm" style="margin-bottom:10px;" onclick="buscarNoBling()">Não achou? Buscar direto no Bling</button>':'');
+}
 var _bt=null,_bq=0;
 function buscarCliente(q){
   clearTimeout(_bt);var box=$('nv-sug');
-  q=q.trim();if(q.length<3){if(box)box.innerHTML='';return;}
-  _bt=setTimeout(async function(){
-    var meu=++_bq;
-    if(box)box.innerHTML='<div class="hint" style="margin:-6px 0 10px;">Buscando no Bling…</div>';
-    try{
-      var r=await fetch(API+'/api/bling/os/contatos?q='+encodeURIComponent(q));
-      var j=await r.json();if(meu!==_bq)return;
-      if(!r.ok)throw new Error(j.error||('HTTP '+r.status));
-      NV._sug=j;
-      box.innerHTML=j.length?'<div class="sug">'+j.map(function(c,i){
-        return'<div onclick="escolherCliente('+i+')"><b>'+esc(c.nome)+'</b><br><small>'+esc([c.telefone,c.documento].filter(Boolean).join(' · ')||'—')+'</small></div>';
-      }).join('')+'</div>':'<div class="hint" style="margin:-6px 0 10px;">Nenhum cliente encontrado.</div>';
-    }catch(e){if(meu===_bq&&box)box.innerHTML='<div class="err">Não consegui buscar no Bling: '+esc(e.message)+'</div>';}
-  },450);
+  q=q.trim();if(q.length<2){if(box)box.innerHTML='';return;}
+  if(CLIENTES.length){mostrarSugestoes(buscarLocal(q),q,'local');return;}
+  /* Lista ainda não carregou neste aparelho: busca no Bling. */
+  if(q.length<3)return;
+  _bt=setTimeout(function(){buscarNoBling(q);},450);
+}
+async function buscarNoBling(q){
+  q=q||val('nv-busca');var box=$('nv-sug');if(!q||q.length<3)return;
+  var meu=++_bq;
+  if(box)box.innerHTML='<div class="hint" style="margin:-6px 0 10px;">Buscando no Bling…</div>';
+  try{
+    var r=await fetch(API+'/api/bling/os/contatos?q='+encodeURIComponent(q));
+    var j=await r.json();if(meu!==_bq)return;
+    if(!r.ok)throw new Error(j.error||('HTTP '+r.status));
+    mostrarSugestoes(j,q,'bling');
+    carregarClientes(true);
+  }catch(e){if(meu===_bq&&box)box.innerHTML='<div class="err">Não consegui buscar no Bling: '+esc(e.message)+'</div>';}
 }
 function escolherCliente(i){NV.contato=NV._sug[i];renderCliente();}
 function renderNumero(){
@@ -890,12 +943,17 @@ async function salvarNovaOS(){
   if(!os.marca)falta.push('marca');
   if(!os.modelo)falta.push('modelo');
   if(!os.problema)falta.push('problema relatado');
+  if(!os.atendente)falta.push('vendedor que recebeu');
   if(!os.prazos.orcamento)falta.push('previsão do orçamento');
   var qz=questLer('nv');os.respostas=qz.respostas;os.questionario=questTexto(qz.respostas);
   if(qz.falta.length)falta.push('questionário (pergunta'+(qz.falta.length>1?'s ':' ')+qz.falta.join(', ')+')');
   if(!F.fotos.length)falta.push('pelo menos 1 foto de entrada');
   if(NV.manual&&!val('nv-numero'))falta.push('nº da OS');
   if(falta.length){nvErro('Falta preencher: '+falta.join(', ')+'.');return;}
+  /* Vendedor: precisa ser um da lista do Bling para a OS sair com ele lá. */
+  var vend=acharVendedor(os.atendente);
+  if(os.atendente&&!vend&&VENDEDORES.length&&!confirm('"'+os.atendente+'" não está no cadastro de vendedores do Bling. Registrar assim mesmo (a OS no Bling fica sem vendedor)?'))return;
+  if(vend){os.atendente=vend.nome;os.vendedorId=vend.id;}
   var assin=NV.assin||null;
   if(!assin&&!confirm('O cliente não assinou. Registrar a entrada sem assinatura?\n(Dá para colher a assinatura depois, na OS.)'))return;
   if(assin)os.assinatura=assin;
@@ -908,7 +966,7 @@ async function salvarNovaOS(){
     else{
       btn.textContent='Abrindo OS no Bling…';
       var r=await fetch(API+'/api/bling/os',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
-        chave:NV.chave,
+        chave:NV.chave,vendedorId:os.vendedorId||null,
         contato:cli.blingId?{id:cli.blingId}:{nome:cli.nome,telefone:cli.telefone,documento:cli.documento},
         equipamento:[aparelho(os),os.cor].filter(Boolean).join(' '),numeroSerie:os.nSerie,descricaoProblema:os.problema,dataPrevista:os.prazos.orcamento,
         observacoes:[os.questionario,os.acessorios?'Acessórios: '+os.acessorios:'',os.condicao?'Condição: '+os.condicao:''].filter(Boolean).join('\n\n')
@@ -1677,7 +1735,7 @@ function montarPdfEntrada(o,fotos){
   var doc=new window.jspdf.jsPDF();
   var ML=14,MR=196,az=PURIFIC.azul,c=o.cliente||{};
   var y=pdfCabecalho(doc,'RELATÓRIO DE ENTRADA','Recebimento de aparelho para avaliação técnica',[
-    ['N° OS',o.numero||'-'],['Entrada',fmtDH(o.tempos&&o.tempos.recebido)],['Atendente',o.atendente||'-']
+    ['N° OS',o.numero||'-'],['Entrada',fmtDH(o.tempos&&o.tempos.recebido)],['Vendedor',o.atendente||'-']
   ]);
   function chk(n){if(y+n>272){y=pdfNovaPagina(doc);doc.setFontSize(8.5);}}
   /* 26mm: o título nunca fica sozinho no pé da página, longe do conteúdo. */
@@ -1759,7 +1817,7 @@ function montarPdfEntrada(o,fotos){
   doc.setFont('helvetica','bold');doc.setFontSize(8.5);doc.setTextColor(az[0],az[1],az[2]);
   doc.text(c.nome||'Cliente',cx1,base+5,{align:'center'});doc.text(PURIFIC.nome,cx2,base+5,{align:'center'});
   doc.setFont('helvetica','normal');doc.setFontSize(6.5);doc.setTextColor(140,140,140);
-  doc.text(o.assinatura?'Cliente · assinado em '+fmtDH(o.assinatura.em):'Cliente',cx1,base+9,{align:'center'});doc.text('Atendente: '+(o.atendente||'-'),cx2,base+9,{align:'center'});
+  doc.text(o.assinatura?'Cliente · assinado em '+fmtDH(o.assinatura.em):'Cliente',cx1,base+9,{align:'center'});doc.text('Vendedor: '+(o.atendente||'-'),cx2,base+9,{align:'center'});
   doc.setTextColor(30,30,30);
   pdfRodape(doc,new Date().toLocaleDateString('pt-BR'));
   return doc;
@@ -1869,6 +1927,8 @@ window.addEventListener('online',netStatus);window.addEventListener('offline',ne
 /* Atualiza os "há X min" a cada minuto sem mexer em formulário aberto. */
 setInterval(function(){if(!$('modal').innerHTML&&document.activeElement!==$('busca'))render();},60000);
 if(initFirebase())listen();
+/* Pré-carrega vendedores e a lista de clientes para o recebimento abrir pronto. */
+carregarVendedores();carregarClientes();
 netStatus();render();
 </script>
 </body>
