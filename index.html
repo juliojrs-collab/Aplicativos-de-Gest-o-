@@ -178,11 +178,20 @@ th{font-size:11px;color:var(--text2);text-transform:uppercase;}
 .sec{font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:var(--text2);margin:16px 0 8px;}
 .actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;}
 .actions .btn{flex:1;min-width:140px;}
+.setor-pill{flex:none;background:rgba(255,255,255,.18);color:#fff;border:1px solid rgba(255,255,255,.45);border-radius:20px;padding:5px 11px;font-size:12px;font-weight:700;white-space:nowrap;}
+.setor-ini{max-width:440px;margin:32px auto 0;text-align:center;}
+.setor-ini h2{font-size:21px;margin-bottom:4px;}
+.setor-btn{display:block;width:100%;border:none;border-radius:var(--r);padding:22px 18px;margin-top:14px;color:#fff;font-size:19px;font-weight:700;box-shadow:var(--sh2);}
+.setor-btn small{display:block;font-size:13px;font-weight:600;opacity:.9;margin-top:4px;}
+.setor-c{background:var(--blue);}
+.setor-m{background:var(--teal);}
+.lado{font-size:13px;font-weight:700;color:var(--text2);margin:22px 0 4px;padding-top:10px;border-top:2px solid var(--border2);}
+.lado:first-of-type{border-top:none;padding-top:0;margin-top:4px;}
 </style>
 </head>
 <body>
 <div class="top">
-  <div class="top-in"><h1>🔧 Aquapuri - Módulo Manutenção</h1><span class="net" id="net"></span></div>
+  <div class="top-in"><h1>🔧 Aquapuri - Módulo Manutenção</h1><span class="net" id="net"></span><button class="setor-pill" id="setor-pill" onclick="trocarSetor()" style="display:none"></button></div>
   <div class="tabs" id="tabs"></div>
 </div>
 <main id="app"><div class="empty">Carregando…</div></main>
@@ -267,6 +276,28 @@ var ETAPAS=[
 ];
 var ET={};ETAPAS.forEach(function(e){ET[e.k]=e;});
 
+/* Cada setor tem a sua tela. DONO diz quem age em cada etapa: o setor dono vê
+   a OS como tarefa dele; o outro só acompanha, com o rótulo do ponto de vista
+   dele ("Enviado ao comercial…", "Aguardando orçamento…"). A manutenção faz o
+   orçamento técnico e o serviço; o comercial recebe, coloca preço, fala com o
+   cliente e entrega. Um não faz as ações do outro. */
+var SETORES={comercial:'Comercial',manutencao:'Manutenção'};
+var DONO={recebido:'manutencao',em_orcamento:'manutencao',aguardando_preco:'comercial',aguardando_aprovacao:'comercial',
+  aprovado:'manutencao',em_servico:'manutencao',pronto:'comercial',devolver:'comercial'};
+var ROTULO={
+  manutencao:{recebido:'Fazer orçamento',em_orcamento:'Em orçamento',aguardando_preco:'Enviado ao comercial · aguardando preço',
+    aguardando_aprovacao:'Aguardando aprovação do cliente',aprovado:'Aprovado · iniciar serviço',em_servico:'Em serviço',
+    pronto:'Enviado ao comercial · aguardando retirada',devolver:'Reprovado · devolver ao cliente'},
+  comercial:{recebido:'Na manutenção · aguardando orçamento',em_orcamento:'Técnico fazendo o orçamento',aguardando_preco:'Colocar preço',
+    aguardando_aprovacao:'Passar ao cliente · aguardando aprovação',aprovado:'Aprovado · enviado à manutenção',em_servico:'Em manutenção',
+    pronto:'Entregar ao cliente',devolver:'Devolver ao cliente'}
+};
+function outroSetor(){return S.setor==='comercial'?'manutencao':'comercial';}
+function doOutro(k){return!!(S.setor&&DONO[k]&&DONO[k]!==S.setor);}
+function rotuloEtapa(k){return(S.setor&&ROTULO[S.setor][k])||(ET[k]?ET[k].l:k);}
+function ehComercial(){return S.setor==='comercial';}
+function ehManutencao(){return S.setor==='manutencao';}
+
 /* Intervalos medidos em cada OS: de um carimbo até o seguinte. */
 var TRECHOS=[
   {k:'esperaOrc', l:'Espera p/ orçamento', de:'recebido', ate:'orcIni'},
@@ -284,7 +315,7 @@ var ALERTA_H={recebido:24,em_orcamento:24,aguardando_preco:24,aguardando_aprovac
 
 /* ═══ Estado ═════════════════════════════════════════════════════════════ */
 var db=null,storage=null,FB_ERR='';
-var S={view:'lista',os:[],tec:[],loaded:false,filtro:'abertas',busca:'',dash:{dias:30},dbErr:''};
+var S={setor:'',view:'lista',os:[],tec:[],loaded:false,filtro:'abertas',busca:'',dash:{dias:30},dbErr:''};
 var unsub=[];
 
 function initFirebase(){
@@ -326,7 +357,7 @@ function fmtDur(ms){
 }
 function money(v){return'R$ '+(Number(v)||0).toFixed(2).replace('.',',');}
 function num(v){var n=parseFloat(String(v||'').replace(',','.'));return isNaN(n)?0:n;}
-function etapaBadge(k){var e=ET[k]||{l:k,c:'b-gray'};return'<span class="badge '+e.c+'">'+esc(e.l)+'</span>';}
+function etapaBadge(k){var e=ET[k]||{l:k,c:'b-gray'};return'<span class="badge '+(doOutro(k)?'b-gray':e.c)+'">'+esc(rotuloEtapa(k))+'</span>';}
 function aparelho(o){return((o.marca||'')+' '+(o.modelo||'')).trim()||'Purificador';}
 function osLabel(o){return o.numero?'OS '+o.numero:'OS s/ nº';}
 function desdeEtapa(o){var e=ET[o.etapa];var t=e&&o.tempos[e.t];return t?Date.now()-t:null;}
@@ -470,16 +501,31 @@ function abrirMidia(i){
 }
 
 /* ═══ Navegação ══════════════════════════════════════════════════════════ */
-var TABS=[{k:'lista',l:'Ordens de serviço'},{k:'painel',l:'Medição'},{k:'tecnicos',l:'Técnicos'}];
+var TABS=[{k:'lista',l:'Ordens de serviço'},{k:'painel',l:'Medição'},{k:'tecnicos',l:'Técnicos',so:'manutencao'}];
 function go(v){S.view=v;window.scrollTo(0,0);render();}
 function renderTabs(){
-  $('tabs').innerHTML=TABS.map(function(t){return'<button class="tab'+(S.view===t.k?' on':'')+'" onclick="go(\''+t.k+'\')">'+t.l+'</button>';}).join('');
+  var pill=$('setor-pill');pill.style.display=S.setor?'':'none';
+  pill.textContent=S.setor?(ehComercial()?'🧾 ':'🔧 ')+SETORES[S.setor]+' ⇄':'';pill.title='Trocar setor';
+  if(!S.setor){$('tabs').innerHTML='';return;}
+  $('tabs').innerHTML=TABS.filter(function(t){return!t.so||t.so===S.setor;}).map(function(t){return'<button class="tab'+(S.view===t.k?' on':'')+'" onclick="go(\''+t.k+'\')">'+t.l+'</button>';}).join('');
+}
+/* Ao abrir o app, sempre a tela de escolha do setor. */
+function escolherSetor(s){S.setor=s;S.view='lista';S.filtro='abertas';S.busca='';window.scrollTo(0,0);render();}
+function trocarSetor(){S.setor='';fecharModal();window.scrollTo(0,0);render();}
+function vInicio(){
+  function n(s){return S.os.filter(function(o){return DONO[o.etapa]===s;}).length;}
+  function tx(k){return k?k+' OS aguardando o setor':'nada pendente';}
+  return'<div class="setor-ini"><h2>Escolha o setor</h2><p class="sub">Cada setor vê primeiro as OS que dependem dele.</p>'
+    +'<button class="setor-btn setor-c" onclick="escolherSetor(\'comercial\')">🧾 Comercial<small>'+(S.loaded?tx(n('comercial')):'carregando…')+'</small></button>'
+    +'<button class="setor-btn setor-m" onclick="escolherSetor(\'manutencao\')">🔧 Manutenção<small>'+(S.loaded?tx(n('manutencao')):'carregando…')+'</small></button></div>';
 }
 function render(){
   renderTabs();
   var a=$('app');
   if(FB_ERR){a.innerHTML='<div class="err">'+esc(FB_ERR)+'</div>';return;}
+  if(!S.setor){a.innerHTML=vInicio();return;}
   if(!S.loaded){a.innerHTML='<div class="empty">Carregando…</div>';return;}
+  if(S.view==='tecnicos'&&!ehManutencao())S.view='lista';
   var h=S.dbErr?'<div class="err">'+esc(S.dbErr)+'</div>':'';
   if(S.view==='lista')h+=vLista();
   else if(S.view==='painel')h+=vPainel();
@@ -572,10 +618,10 @@ function alterarPrazos(id){
 var FILTROS=[
   {k:'abertas',l:'Abertas',f:function(o){return o.etapa!=='entregue';}},
   {k:'atrasadas',l:'⚠ Atrasadas',f:prazoVencido},
-  {k:'oficina',l:'Na oficina',f:function(o){return['recebido','em_orcamento','aprovado','em_servico'].indexOf(o.etapa)>=0;}},
-  {k:'balcao',l:'No balcão',f:function(o){return['aguardando_preco','aguardando_aprovacao','pronto','devolver'].indexOf(o.etapa)>=0;}},
+  {k:'minhas',l:'Com o meu setor',f:function(o){return DONO[o.etapa]===S.setor;}},
+  {k:'outro',l:'Com o outro setor',f:function(o){return doOutro(o.etapa);}},
   {k:'paradas',l:'Paradas',f:function(o){return o.etapa!=='entregue'&&atrasada(o);}}
-].concat(ETAPAS.map(function(e){return{k:e.k,l:e.l,f:function(o){return o.etapa===e.k;}};}))
+].concat(ETAPAS.map(function(e){return{k:e.k,et:e.k,f:function(o){return o.etapa===e.k;}};}))
  .concat([{k:'todas',l:'Todas',f:function(){return true;}}]);
 function vLista(){
   var fil=FILTROS.filter(function(x){return x.k===S.filtro;})[0]||FILTROS[0];
@@ -584,28 +630,38 @@ function vLista(){
     if(!q)return true;
     return [o.numero,o.cliente&&o.cliente.nome,o.cliente&&o.cliente.telefone,o.marca,o.modelo,o.cor,o.nSerie].join(' ').toLowerCase().indexOf(q)>=0;
   });
-  var h='<div class="ph"><div><h2>Ordens de serviço</h2><p class="sub">'+S.os.filter(FILTROS[0].f).length+' abertas · '+S.os.length+' no total</p></div>'
+  var minhas=S.os.filter(function(o){return DONO[o.etapa]===S.setor;}).length;
+  var h='<div class="ph"><div><h2>Ordens de serviço · '+SETORES[S.setor]+'</h2><p class="sub"><b>'+minhas+' com você</b> · '+S.os.filter(FILTROS[0].f).length+' abertas · '+S.os.length+' no total</p></div>'
     /* Botão "Importar do Bling" fora da tela a pedido da loja (começaram do
        zero). A função importarBling() continua no código para uso futuro. */
     +'</div>';
   h+='<input class="search" id="busca" placeholder="Buscar por nº da OS, cliente, telefone, modelo…" value="'+esc(S.busca)+'" oninput="S.busca=this.value;S._focoBusca=true;render()"/>';
   h+='<div class="chips">'+FILTROS.map(function(x){
     var n=S.os.filter(x.f).length;
-    return'<button class="chip'+(S.filtro===x.k?' on':'')+'" onclick="S.filtro=\''+x.k+'\';render()">'+esc(x.l)+'<b>'+n+'</b></button>';
+    return'<button class="chip'+(S.filtro===x.k?' on':'')+'" onclick="S.filtro=\''+x.k+'\';render()">'+esc(x.et?rotuloEtapa(x.et):x.l)+'<b>'+n+'</b></button>';
   }).join('')+'</div>';
   if(!list.length)h+='<div class="empty">Nenhuma OS aqui.</div>';
   /* Mais urgente primeiro: prazo mais próximo (atrasadas no topo); sem prazo
      vai para o fim, na ordem de chegada. */
   list.sort(function(a,b){return chavePrazo(a)-chavePrazo(b)||(a.criadoEm||0)-(b.criadoEm||0);});
-  if(S.filtro==='abertas'&&!q){
-    ETAPAS.forEach(function(e){
+  /* Primeiro o que depende do setor; depois, só para acompanhar, o que está
+     com o outro setor. Dentro de cada parte, agrupado por etapa. */
+  function grupos(etapas){
+    etapas.forEach(function(e){
       var g=list.filter(function(o){return o.etapa===e.k;});if(!g.length)return;
       var atr=g.filter(prazoVencido).length;
       h+='<div class="grp">'+etapaBadge(e.k)+' <b>'+g.length+'</b>'+(atr?' <span class="badge b-red">'+atr+' atrasada'+(atr>1?'s':'')+'</span>':'')+'</div>';
       g.forEach(function(o){h+=cardOS(o,true);});
     });
+  }
+  if(S.filtro==='abertas'&&!q&&list.length){
+    var meu=ETAPAS.filter(function(e){return DONO[e.k]===S.setor;}),dele=ETAPAS.filter(function(e){return doOutro(e.k);});
+    var nMeu=list.filter(function(o){return DONO[o.etapa]===S.setor;}).length;
+    h+='<div class="lado">Com você — '+SETORES[S.setor]+'</div>';
+    if(nMeu)grupos(meu);else h+='<div class="sub" style="padding:8px 0;">Nada pendente para o seu setor agora. ✔</div>';
+    if(list.length>nMeu){h+='<div class="lado">Com '+(ehComercial()?'a manutenção':'o comercial')+' — só acompanhamento</div>';grupos(dele);}
   }else list.forEach(function(o){h+=cardOS(o);});
-  h+='<button class="btn btn-p fab" onclick="novaOS()">＋ Receber aparelho</button>';
+  if(ehComercial())h+='<button class="btn btn-p fab" onclick="novaOS()">＋ Receber aparelho</button>';
   return h;
 }
 function cardOS(o,agrupado){
@@ -1068,10 +1124,10 @@ function detalheHtml(o,midias){
     +(o.blingId&&o.blingEquipErro?'<div class="err">A correção do aparelho não foi para o Bling: '+esc(o.blingEquipErro)+' <button class="btn btn-g btn-sm" onclick="reenviarEquip(\''+o.id+'\')">Tentar de novo</button></div>':'')
     +'<div class="sec">Avaliação técnica</div>'
     +(avalPaga(o)?'<div><span class="badge b-green">Paga '+money(avalValor(o))+'</span> <span class="sub">'+fmtDH(o.avaliacao.em)+'</span></div>'
-      :'<div style="margin-bottom:6px;"><span class="badge b-red">Não paga</span></div><button class="btn btn-g btn-sm" onclick="registrarAvaliacao(\''+o.id+'\')">💵 Registrar pagamento da avaliação ('+money(VALOR_AVALIACAO)+')</button>')
+      :'<div style="margin-bottom:6px;"><span class="badge b-red">Não paga</span></div>'+(ehComercial()?'<button class="btn btn-g btn-sm" onclick="registrarAvaliacao(\''+o.id+'\')">💵 Registrar pagamento da avaliação ('+money(VALOR_AVALIACAO)+')</button>':''))
     +'<div class="sec">Assinatura do cliente</div>'
     +(o.assinatura?'<div class="sig-img"><img src="'+o.assinatura.img+'"/></div><div class="sub">Assinado em '+fmtDH(o.assinatura.em)+'</div>'
-      :'<div class="sub" style="margin-bottom:6px;">Sem assinatura.</div><button class="btn btn-g btn-sm" onclick="colherAssinatura(\''+o.id+'\')">✍️ Colher assinatura do cliente</button>')
+      :'<div class="sub" style="margin-bottom:6px;">Sem assinatura.</div>'+(ehComercial()?'<button class="btn btn-g btn-sm" onclick="colherAssinatura(\''+o.id+'\')">✍️ Colher assinatura do cliente</button>':''))
     +'</div>';
   if(o.orcamento){
     var q=o.orcamento;
@@ -1080,21 +1136,23 @@ function detalheHtml(o,midias){
       +'<dt>Diagnóstico</dt><dd>'+esc(q.diagnostico||'-')+'</dd>'
       +(q.servicos?'<dt>Serviços</dt><dd>'+esc(q.servicos)+'</dd>':'')
       +(q.pecas?'<dt>Peças</dt><dd>'+esc(q.pecas)+'</dd>':'')
+      +(q.obsTecnico?'<dt>Obs. do técnico</dt><dd>'+esc(q.obsTecnico)+'</dd>':'')
       +(temPreco(o)
         ?'<dt>Comercial</dt><dd>'+esc(o.comercial||'-')+'</dd>'
           +(q.itens&&q.itens.length?'<dt>Itens</dt><dd>'+q.itens.map(function(x){return esc(x.nome)+' — '+String(x.qtd).replace('.',',')+' × '+money(x.valor)+' = '+money(x.qtd*x.valor);}).join('\n')+'</dd>':'')
           +'<dt>Total</dt><dd><b>'+money(q.total)+'</b></dd>'
           +(avalPaga(o)&&o.aprovado!==false?'<dt>Avaliação paga</dt><dd>− '+money(avalValor(o))+'</dd><dt>A pagar</dt><dd><b>'+money(aReceber(o))+'</b></dd>':'')
           +(o.blingId&&q.itens?'<dt>Bling</dt><dd>'+(q.blingLancadoEm?'<span class="badge b-green">Itens lançados '+fmtDH(q.blingLancadoEm)+'</span>'
-            :'<span class="badge b-red">Não lançado</span> <button class="btn btn-g btn-sm" onclick="relancarBling(\''+o.id+'\')">Lançar no Bling</button>'+(q.blingErro?'<div class="sub">'+esc(q.blingErro)+'</div>':''))+'</dd>':'')
+            :'<span class="badge b-red">Não lançado</span>'+(ehComercial()?' <button class="btn btn-g btn-sm" onclick="relancarBling(\''+o.id+'\')">Lançar no Bling</button>':'')+(q.blingErro?'<div class="sub">'+esc(q.blingErro)+'</div>':''))+'</dd>':'')
         :'<dt>Preço</dt><dd><span class="badge b-orange">Aguardando o comercial</span></dd>')
       +(o.obsResposta?'<dt>Obs. do cliente</dt><dd>'+esc(o.obsResposta)+'</dd>':'')
       +((q.historico||[]).length?'<dt>Alterações</dt><dd>'+q.historico.map(function(x){return fmtDH(x.em)+': '+money(x.de)+' → '+money(x.para);}).join('\n')+'</dd>'
         :q.editadoEm?'<dt>Preço editado em</dt><dd>'+fmtDH(q.editadoEm)+'</dd>':'')
       +(q.diagEditadoEm?'<dt>Diagnóstico editado</dt><dd>'+fmtDH(q.diagEditadoEm)+'</dd>':'')
       +'</dl><div class="sec">Fotos do problema</div>'+(midias?galeria(midias,'problema'):'<div class="sub">Carregando…</div>')
-      +'<div style="display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap;margin-top:10px;"><button class="btn btn-g btn-sm" onclick="editarDiag(\''+o.id+'\')">✏️ Editar diagnóstico</button>'
-      +(temPreco(o)?'<button class="btn btn-g btn-sm" onclick="editarOrc(\''+o.id+'\')">💲 Editar preço</button>'
+      +'<div style="display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap;margin-top:10px;">'
+      +(ehManutencao()?'<button class="btn btn-g btn-sm" onclick="editarDiag(\''+o.id+'\')">✏️ Editar diagnóstico</button>':'')
+      +(!ehComercial()?'':temPreco(o)?'<button class="btn btn-g btn-sm" onclick="editarOrc(\''+o.id+'\')">💲 Editar preço</button>'
         :o.etapa!=='aguardando_preco'?'<button class="btn btn-p btn-sm" onclick="precificar(\''+o.id+'\')">💲 Colocar preço</button>':'')+'</div></div>';
   }
   if(o.servico){
@@ -1103,11 +1161,14 @@ function detalheHtml(o,midias){
       +(o.servico.obs?'<dt>O que foi feito</dt><dd>'+esc(o.servico.obs)+'</dd>':'')
       +'</dl><div class="sec">Aparelho funcionando (fotos e vídeo)</div>'+(midias?galeria(midias,'funcionando'):'<div class="sub">Carregando…</div>')+'</div>';
   }
-  h+='<div style="display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap;margin-top:6px;"><button class="btn btn-p btn-sm" onclick="relatorioEntrada(\''+o.id+'\')">📄 Relatório de entrada</button><button class="btn btn-g btn-sm" onclick="editarRecepcao(\''+o.id+'\')">Editar dados da recepção</button><button class="btn btn-sm btn-del" onclick="apagarOS(\''+o.id+'\')">🗑 Apagar OS</button></div>';
+  h+='<div style="display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap;margin-top:6px;"><button class="btn btn-p btn-sm" onclick="relatorioEntrada(\''+o.id+'\')">📄 Relatório de entrada</button>'
+    +(ehComercial()?'<button class="btn btn-g btn-sm" onclick="editarRecepcao(\''+o.id+'\')">Editar dados da recepção</button><button class="btn btn-sm btn-del" onclick="apagarOS(\''+o.id+'\')">🗑 Apagar OS</button>':'')+'</div>';
   return h;
 }
 function acoesHtml(o){
   var id=o.id,b='';
+  if(doOutro(o.etapa))return'<div class="info" style="margin-bottom:12px;">Esta OS está com '+(DONO[o.etapa]==='comercial'?'o comercial':'a manutenção')
+    +': <b>'+esc(rotuloEtapa(o.etapa))+'</b>.<br>As ações desta etapa são feitas na tela '+(DONO[o.etapa]==='comercial'?'do Comercial':'da Manutenção')+'.</div>';
   switch(o.etapa){
     case'recebido':b='<button class="btn btn-p btn-lg" onclick="iniciarOrc(\''+id+'\')">🔧 Iniciar orçamento</button>';break;
     case'em_orcamento':b='<button class="btn btn-p btn-lg" onclick="finalizarOrc(\''+id+'\')">📋 Finalizar orçamento</button>';break;
@@ -1170,6 +1231,8 @@ function orcFormHtml(o){
     +'<div class="field"><label>Diagnóstico <span class="req">*</span></label><textarea id="ps-diag" rows="3">'+esc(q.diagnostico||'')+'</textarea></div>'
     +'<div class="field"><label>Serviços a realizar</label><textarea id="ps-serv" rows="2">'+esc(q.servicos||'')+'</textarea></div>'
     +'<div class="field"><label>Peças necessárias</label><textarea id="ps-pecas" rows="3" placeholder="Uma peça por linha">'+esc(q.pecas||'')+'</textarea></div>'
+    +'<div class="field"><label>Observações para o comercial</label><textarea id="ps-obs" rows="2" placeholder="Ex.: valor combinado para um item específico">'+esc(q.obsTecnico||'')+'</textarea>'
+    +'<div class="hint">O preço é colocado pelo comercial. Use aqui só quando houver algo específico a passar.</div></div>'
     +'<div class="field"><label>Previsão de término do serviço <span class="req">*</span></label><input type="date" id="ps-termino" value="'+esc((o.prazos&&o.prazos.entrega)||maisDias(3))+'"/>'
     +'<div class="hint">Em quanto tempo você termina o conserto, se o cliente aprovar. É com esta data que o seu prazo é medido.</div></div>';
 }
@@ -1279,6 +1342,7 @@ function resumoTecnico(o){
     +'<dt>Diagnóstico</dt><dd>'+esc(q.diagnostico||'-')+'</dd>'
     +(q.servicos?'<dt>Serviços</dt><dd>'+esc(q.servicos)+'</dd>':'')
     +'<dt>Peças</dt><dd>'+esc(q.pecas||'Nenhuma')+'</dd>'
+    +(q.obsTecnico?'<dt>Obs. do técnico</dt><dd><b>'+esc(q.obsTecnico)+'</b></dd>':'')
     +'<dt>Término previsto</dt><dd>'+fmtData(o.prazos&&o.prazos.entrega)+' <span class="sub">(definido pelo técnico)</span></dd></dl></div>';
 }
 function precificar(id){
@@ -1314,7 +1378,7 @@ function finalizarOrc(id){
       var nm=(o.midias||{});nm.problema=(nm.problema||0)+F.fotos.length+F.videos.length;
       F.fotos=[];F.videos=[];
       await avancar(id,{etapa:'aguardando_preco','tempos.orcFim':Date.now(),tecnicoOrc:tec,midias:nm,'prazos.entrega':termino,
-        orcamento:{diagnostico:diag,servicos:val('ps-serv'),pecas:val('ps-pecas')}},'Orçamento técnico finalizado — vai para o comercial');
+        orcamento:{diagnostico:diag,servicos:val('ps-serv'),pecas:val('ps-pecas'),obsTecnico:val('ps-obs')}},'Orçamento técnico finalizado — vai para o comercial');
     });
   renderMidiaForm();
 }
@@ -1334,7 +1398,7 @@ function editarDiag(id){
       if(!diag){psErro('Escreva o diagnóstico.');return false;}
       if(F.enviandoVideo){psErro('Espere o vídeo terminar de enviar.');return false;}
       if(!val('ps-termino')){psErro('Informe a previsão de término do serviço.');return false;}
-      var upd={tecnicoOrc:tec,'prazos.entrega':val('ps-termino'),'orcamento.diagnostico':diag,'orcamento.servicos':val('ps-serv'),'orcamento.pecas':val('ps-pecas'),'orcamento.diagEditadoEm':Date.now()};
+      var upd={tecnicoOrc:tec,'prazos.entrega':val('ps-termino'),'orcamento.diagnostico':diag,'orcamento.servicos':val('ps-serv'),'orcamento.pecas':val('ps-pecas'),'orcamento.obsTecnico':val('ps-obs'),'orcamento.diagEditadoEm':Date.now()};
       var novas=F.fotos.length+F.videos.length;
       if(novas){
         $('ps-ok').textContent='Salvando fotos…';
