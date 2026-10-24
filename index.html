@@ -792,14 +792,18 @@ var TERMO_ENTRADA='Declaro que entreguei o aparelho descrito acima nas condiçõ
    aprovado. Se não aprovar, a avaliação fica como o valor cobrado. */
 function avalPaga(o){return!!(o.avaliacao&&o.avaliacao.pago);}
 function avalValor(o){return o.avaliacao&&o.avaliacao.valor!=null?o.avaliacao.valor:VALOR_AVALIACAO;}
+/* Isenta: a loja decidiu não cobrar a retirada/avaliação desta OS. */
+function avalIsenta(o){return!!(o.avaliacao&&o.avaliacao.isento);}
 function aReceber(o){
   var q=o.orcamento||{},t=Number(q.total)||0,av=avalValor(o);
+  if(avalIsenta(o))return o.aprovado===false?0:t;
   if(o.aprovado===false)return avalPaga(o)?0:av;
   return Math.max(0,t-(avalPaga(o)?av:0));
 }
 /* Texto com a conta do que cobrar, para os avisos do balcão. */
 function contaCliente(o){
   var q=o.orcamento||{},av=avalValor(o);
+  if(avalIsenta(o))return o.aprovado===false?'Retirada/avaliação isenta — nada a cobrar.':'Orçamento <b>'+money(q.total)+'</b> (retirada/avaliação isenta).';
   if(o.aprovado===false)return avalPaga(o)?'Avaliação de '+money(av)+' já paga na entrada — nada a cobrar.':'Cobrar a avaliação: <b>'+money(av)+'</b>.';
   return avalPaga(o)?'Orçamento '+money(q.total)+' − avaliação paga '+money(av)+' = <b>'+money(aReceber(o))+' a pagar</b>'
     :'Orçamento <b>'+money(q.total)+'</b> (avaliação ainda não foi paga).';
@@ -926,7 +930,8 @@ function novaOS(externa){
       ?'<div class="info"><b>Retirada com avaliação técnica: '+money(VALOR_RETIRADA)+'</b>, descontada do serviço se o orçamento for aprovado. Em alguns casos não é cobrada.</div>'
         +'<div class="field"><label>Pagamento da retirada <span class="req">*</span></label>'
         +'<label class="radio-l"><input type="radio" name="nv-ret" value="sim"/> Pagou no local</label>'
-        +'<label class="radio-l"><input type="radio" name="nv-ret" value="nao"/> Não pagou no local</label></div>'
+        +'<label class="radio-l"><input type="radio" name="nv-ret" value="nao"/> Não pagou no local</label>'
+        +'<label class="radio-l"><input type="radio" name="nv-ret" value="isento"/> Isento (não será cobrado)</label></div>'
       :'<div class="info"><b>Avaliação técnica: '+money(VALOR_AVALIACAO)+'</b>, paga agora na entrega do aparelho e descontada do serviço se o orçamento for aprovado. Informe o cliente antes de ele assinar.</div>'
         +'<label style="display:flex;gap:8px;align-items:center;margin-bottom:12px;font-size:14px;font-weight:600;"><input type="checkbox" id="nv-aval" style="width:22px;height:22px;"/> Cliente pagou a avaliação ('+money(VALOR_AVALIACAO)+')</label>')
     +assinHtml()
@@ -1050,7 +1055,7 @@ async function salvarNovaOS(){
   if(NV.externa&&!os.tecnicoExterno)falta.push('técnico que retirou');
   if(!os.atendente)falta.push(NV.externa?'vendedor responsável':'vendedor que recebeu');
   if(!NV.externa&&!os.prazos.orcamento)falta.push('previsão do orçamento');
-  if(NV.externa&&!ret)falta.push('pagamento da retirada (pagou ou não no local)');
+  if(NV.externa&&!ret)falta.push('pagamento da retirada (pagou, não pagou ou isento)');
   var qz=questLer('nv');os.respostas=qz.respostas;os.questionario=questTexto(qz.respostas);
   if(qz.falta.length)falta.push('questionário (pergunta'+(qz.falta.length>1?'s ':' ')+qz.falta.join(', ')+')');
   if(!F.fotos.length)falta.push('pelo menos 1 foto de entrada');
@@ -1065,7 +1070,7 @@ async function salvarNovaOS(){
   if(assin)os.assinatura=assin;
   if(NV.externa){
     var pg=ret.value==='sim';
-    os.avaliacao={tipo:'retirada',valor:VALOR_RETIRADA,pago:pg,noLocal:pg,em:pg?Date.now():null};
+    os.avaliacao={tipo:'retirada',valor:VALOR_RETIRADA,pago:pg,noLocal:pg,isento:ret.value==='isento',em:pg?Date.now():null};
   }else{
     var pagou=$('nv-aval')&&$('nv-aval').checked;
     if(!pagou&&!confirm('A avaliação de '+money(VALOR_AVALIACAO)+' não foi marcada como paga. Registrar assim mesmo?\n(Dá para registrar o pagamento depois, na OS.)'))return;
@@ -1184,7 +1189,8 @@ function detalheHtml(o,midias){
     +'</dl><div class="sec">Fotos de entrada</div><div id="det-mid">'+(midias?galeria(midias,'entrada'):'<div class="sub">Carregando…</div>')+'</div>'
     +(o.blingId&&o.blingEquipErro?'<div class="err">A correção do aparelho não foi para o Bling: '+esc(o.blingEquipErro)+' <button class="btn btn-g btn-sm" onclick="reenviarEquip(\''+o.id+'\')">Tentar de novo</button></div>':'')
     +'<div class="sec">'+(externa(o)?'Retirada e avaliação técnica':'Avaliação técnica')+'</div>'
-    +(avalPaga(o)?'<div><span class="badge b-green">Paga '+money(avalValor(o))+(o.avaliacao.noLocal?' no local':'')+'</span> <span class="sub">'+fmtDH(o.avaliacao.em)+'</span></div>'
+    +(avalIsenta(o)?'<div><span class="badge b-gray">Isenta — não cobrada</span></div>'
+      :avalPaga(o)?'<div><span class="badge b-green">Paga '+money(avalValor(o))+(o.avaliacao.noLocal?' no local':'')+'</span> <span class="sub">'+fmtDH(o.avaliacao.em)+'</span></div>'
       :'<div style="margin-bottom:6px;"><span class="badge b-red">Não paga</span></div>'+(ehComercial()?'<button class="btn btn-g btn-sm" onclick="registrarAvaliacao(\''+o.id+'\')">💵 Registrar pagamento ('+money(avalValor(o))+')</button>':''))
     +'<div class="sec">Assinatura do cliente</div>'
     +(o.assinatura?'<div class="sig-img"><img src="'+o.assinatura.img+'"/></div><div class="sub">Assinado em '+fmtDH(o.assinatura.em)+'</div>'
@@ -1943,7 +1949,7 @@ function montarPdfEntrada(o,fotos){
   }
   section('Próximos passos');
   var termo=['Seu purificador será avaliado pela nossa equipe técnica.',
-    (ext?'Retirada com avaliação técnica: ':'Avaliação técnica: ')+money(avalValor(o))+(avalPaga(o)?(ext?' (paga no local)':' (paga na entrada)'):' (a pagar)')+'. Se o orçamento for aprovado, esse valor é descontado do serviço.',
+    (ext?'Retirada com avaliação técnica: ':'Avaliação técnica: ')+(avalIsenta(o)?'isenta, sem cobrança.':money(avalValor(o))+(avalPaga(o)?(ext?' (paga no local)':' (paga na entrada)'):' (a pagar)')+'. Se o orçamento for aprovado, esse valor é descontado do serviço.'),
     'Antes de qualquer serviço, entraremos em contato com o orçamento para sua aprovação.',
     'Guarde este comprovante: o número da OS identifica o seu aparelho na loja.'];
   doc.setFont('helvetica','normal');
