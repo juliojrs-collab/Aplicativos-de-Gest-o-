@@ -229,7 +229,9 @@ var QUEST=[
   {p:'O purificador está gelando normalmente?',o:['Sim','Não gela','Gela pouco','Modelo sem refrigeração']},
   {p:'Quanto tempo de uso tem o refil?',o:['Menos de 6 meses','6 a 12 meses','Mais de 1 ano','Não sabe']},
   {p:'Modelo/marca do refil?',o:['Original da marca','Paralelo/compatível','Não sabe']},
-  {p:'A água utilizada é da caixa ou da rua?',o:['Caixa','Rua','Poço','Não sabe']},
+  {p:'A água utilizada é da caixa ou da rua?',o:['Caixa','Rua','Poço','Não sabe'],
+    /* Água da rua: pergunta também a pressão (mesmas opções do app de campo). */
+    sub:{se:'Rua',p:'Qual a pressão da água da rua?',l:'Pressão',o:['Baixa','Normal','Alta','Não sabe']}},
   {p:'Já foi realizada alguma manutenção anterior no purificador?',o:['Não','Sim, na Purific','Sim, em outra assistência','Não sabe']}
 ];
 /* Cada pergunta vira botões de resposta + "Outro" com campo livre. A resposta
@@ -244,6 +246,9 @@ function questHtml(px,resp){
         return'<button type="button" class="chip'+(on?' on':'')+'" data-v="'+esc(op)+'" onclick="qSel(\''+px+'\','+i+',this)">'+esc(op)+'</button>';
       }).join('')+'</div>'
       +'<input id="'+px+'-q'+i+'-outro" placeholder="Escreva a resposta" style="margin-top:6px;'+(ehOutro?'':'display:none')+'" value="'+esc(ehOutro?atual:'')+'"/>'
+      +(q.sub?'<div id="'+px+'-q'+i+'-subw" style="margin-top:8px;'+(atual===q.sub.se?'':'display:none')+'"><label>'+esc(q.sub.p)+' <span class="req">*</span></label><div class="opts" id="'+px+'-q'+i+'-sub">'
+        +q.sub.o.map(function(op){var sr=resp&&resp[i]&&resp[i].sub?resp[i].sub.r:'';
+          return'<button type="button" class="chip'+(op===sr?' on':'')+'" data-v="'+esc(op)+'" onclick="qSub(\''+px+'\','+i+',this)">'+esc(op)+'</button>';}).join('')+'</div></div>':'')
       +'<input id="'+px+'-q'+i+'-obs" placeholder="Observação (opcional)" style="margin-top:6px;font-size:13px;" value="'+esc(obs)+'"/></div>';
   }).join('');
 }
@@ -252,6 +257,11 @@ function qSel(px,i,btn){
   Array.prototype.forEach.call(box.children,function(b){b.classList.toggle('on',b===btn);});
   var out=$(px+'-q'+i+'-outro'),outro=btn.getAttribute('data-v')==='Outro';
   out.style.display=outro?'':'none';if(outro)out.focus();
+  var q=QUEST[i],sw=$(px+'-q'+i+'-subw');
+  if(q.sub&&sw)sw.style.display=btn.getAttribute('data-v')===q.sub.se?'':'none';
+}
+function qSub(px,i,btn){
+  Array.prototype.forEach.call($(px+'-q'+i+'-sub').children,function(b){b.classList.toggle('on',b===btn);});
 }
 function questLer(px){
   var resp=[],falta=[];
@@ -259,11 +269,17 @@ function questLer(px){
     var b=$(px+'-q'+i).querySelector('.on'),r='';
     if(b)r=b.getAttribute('data-v')==='Outro'?val(px+'-q'+i+'-outro'):b.getAttribute('data-v');
     if(!r)falta.push(i+1);
-    resp.push({p:q.p,r:r,obs:val(px+'-q'+i+'-obs')});
+    var x={p:q.p,r:r,obs:val(px+'-q'+i+'-obs')};
+    if(q.sub&&r===q.sub.se){
+      var sb=$(px+'-q'+i+'-sub').querySelector('.on');
+      if(sb)x.sub={p:q.sub.p,l:q.sub.l,r:sb.getAttribute('data-v')};else falta.push((i+1)+' (pressão)');
+    }
+    resp.push(x);
   });
   return{respostas:resp,falta:falta};
 }
-function questTexto(resp){return resp.map(function(x,i){return(i+1)+'- '+x.p+'\n   '+(x.r||'-')+(x.obs?' — '+x.obs:'');}).join('\n');}
+function respTexto(x){return(x.r||'-')+(x.sub?' · '+(x.sub.l||'Pressão')+': '+x.sub.r:'')+(x.obs?' — '+x.obs:'');}
+function questTexto(resp){return resp.map(function(x,i){return(i+1)+'- '+x.p+'\n   '+respTexto(x);}).join('\n');}
 var CONDICOES=['Bom','Razoável','Ruim','Engordurado','Outro'];
 
 /* Etapas da OS, na ordem. "t" é o carimbo de horário gravado ao entrar nela. */
@@ -1925,7 +1941,7 @@ function montarPdfEntrada(o,fotos){
     if(o.respostas){
       o.respostas.forEach(function(r,i){
         var lq=doc.splitTextToSize((i+1)+'. '+r.p,MR-ML-4);
-        var lr=doc.splitTextToSize((r.r||'-')+(r.obs?' — '+r.obs:''),MR-ML-10);
+        var lr=doc.splitTextToSize(respTexto(r),MR-ML-10);
         chk((lq.length+lr.length)*4.5+2);
         doc.setFont('helvetica','bold');doc.text(lq,ML+2,y);y+=lq.length*4.5;
         doc.setFont('helvetica','normal');doc.text(lr,ML+8,y);y+=lr.length*4.5+1.5;
