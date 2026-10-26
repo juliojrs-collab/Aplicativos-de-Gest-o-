@@ -1266,8 +1266,9 @@ function acoesHtml(o){
       +'<button class="btn btn-p btn-lg" onclick="receberDoTecnico(\''+id+'\')">📥 Recebi do técnico</button>';break;
     case'recebido':b='<button class="btn btn-p btn-lg" onclick="iniciarOrc(\''+id+'\')">🔧 Iniciar orçamento</button>';break;
     case'em_orcamento':b='<button class="btn btn-p btn-lg" onclick="finalizarOrc(\''+id+'\')">📋 Finalizar orçamento</button>';break;
-    case'aguardando_preco':b='<div class="info">A manutenção terminou o orçamento técnico. Monte o preço no Bling, envie ao cliente e registre aqui.</div>'
-      +'<button class="btn btn-p btn-lg" onclick="orcamentoEnviado(\''+id+'\')">📤 Orçamento enviado ao cliente</button>';break;
+    case'aguardando_preco':b='<div class="info">A manutenção terminou o orçamento técnico. Monte o preço no Bling e envie ao cliente.'
+      +(o.blingId?'<br><b>Ao mudar a OS para "Orçada" no Bling, o app passa sozinho para "Aguardando aprovação"</b> (em até 3 minutos).':'')+'</div>'
+      +'<button class="btn '+(o.blingId?'btn-g':'btn-p btn-lg')+'" onclick="orcamentoEnviado(\''+id+'\')">📤 '+(o.blingId?'Registrar envio manualmente':'Orçamento enviado ao cliente')+'</button>';break;
     case'aguardando_aprovacao':b='<div class="info">'+(o.importado&&o.importado.situacaoBling&&o.tempos.informado&&o.tempos.informado===o.importado.em?'Orçamento passado ao cliente antes do app (importada do Bling). Aguardando a resposta.':o.tempos.informado?'Cliente informado em '+fmtDH(o.tempos.informado)+'. Aguardando a resposta.':'Passe o orçamento ao cliente e registre.')+'<br>'+contaCliente(o)
       +(o.prazos&&o.prazos.entrega?'<br>Previsão de término: <b>'+fmtData(o.prazos.entrega)+'</b>':'')+'</div>'
       +(o.tempos.informado?'':'<button class="btn btn-p btn-lg" style="margin-bottom:8px;" onclick="clienteInformado(\''+id+'\')">📞 Orçamento passado ao cliente</button>')
