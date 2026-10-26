@@ -287,7 +287,7 @@ var ETAPAS=[
   {k:'em_transito',         l:'Em trânsito',          c:'b-purple', t:'retirado'},
   {k:'recebido',            l:'Aguardando orçamento', c:'b-blue',   t:'recebido'},
   {k:'em_orcamento',        l:'Em orçamento',         c:'b-amber',  t:'orcIni'},
-  {k:'aguardando_preco',    l:'Aguardando preço',     c:'b-orange', t:'orcFim'},
+  {k:'aguardando_preco',    l:'Aguardando envio do orçamento',c:'b-orange', t:'orcFim'},
   {k:'aguardando_aprovacao',l:'Aguardando cliente',   c:'b-purple', t:'precificado'},
   {k:'aprovado',            l:'Aprovado — na fila',   c:'b-teal',   t:'resposta'},
   {k:'em_servico',          l:'Em serviço',           c:'b-amber',  t:'servIni'},
@@ -309,11 +309,11 @@ var SETORES={comercial:'Comercial',manutencao:'Manutenção',externo:'Manutenç�
 var DONO={em_transito:'comercial',recebido:'manutencao',em_orcamento:'manutencao',aguardando_preco:'comercial',aguardando_aprovacao:'comercial',
   aprovado:'manutencao',em_servico:'manutencao',pronto:'comercial',devolver:'comercial'};
 var ROTULO={
-  manutencao:{em_transito:'Em trânsito · retirado na casa do cliente',recebido:'Fazer orçamento',em_orcamento:'Em orçamento',aguardando_preco:'Enviado ao comercial · aguardando preço',
+  manutencao:{em_transito:'Em trânsito · retirado na casa do cliente',recebido:'Fazer orçamento',em_orcamento:'Em orçamento',aguardando_preco:'Enviado ao comercial · aguardando envio ao cliente',
     aguardando_aprovacao:'Aguardando aprovação do cliente',aprovado:'Aprovado · iniciar serviço',em_servico:'Em serviço',
     pronto:'Enviado ao comercial · aguardando retirada',devolver:'Reprovado · devolver ao cliente'},
-  comercial:{em_transito:'Receber do técnico externo',recebido:'Na manutenção · aguardando orçamento',em_orcamento:'Técnico fazendo o orçamento',aguardando_preco:'Colocar preço',
-    aguardando_aprovacao:'Passar ao cliente · aguardando aprovação',aprovado:'Aprovado · enviado à manutenção',em_servico:'Em manutenção',
+  comercial:{em_transito:'Receber do técnico externo',recebido:'Na manutenção · aguardando orçamento',em_orcamento:'Técnico fazendo o orçamento',aguardando_preco:'Enviar orçamento ao cliente',
+    aguardando_aprovacao:'Aguardando aprovação do cliente',aprovado:'Aprovado · enviado à manutenção',em_servico:'Em manutenção',
     pronto:'Entregar ao cliente',devolver:'Devolver ao cliente'},
   externo:{em_transito:'Em trânsito · entregar na loja',recebido:'Na loja · aguardando orçamento',em_orcamento:'Em orçamento',
     aguardando_preco:'Orçamento técnico pronto',aguardando_aprovacao:'Aguardando aprovação do cliente',aprovado:'Aprovado · na fila do serviço',
@@ -332,8 +332,9 @@ var TRECHOS=[
   {k:'transito',  l:'Trânsito (retirada → loja)', de:'retirado', ate:'recebido'},
   {k:'esperaOrc', l:'Espera p/ orçamento', de:'recebido', ate:'orcIni'},
   {k:'orcamento', l:'Fazendo orçamento',   de:'orcIni',   ate:'orcFim'},
-  {k:'preco',     l:'Precificação (comercial)', de:'orcFim', ate:'precificado'},
-  {k:'informar',  l:'Passar orçamento ao cliente', de:'precificado', ate:'informado'},
+  /* O preço é feito direto no Bling: o comercial só registra no app que o
+     orçamento foi enviado ao cliente. */
+  {k:'preco',     l:'Comercial envia orçamento ao cliente', de:'orcFim', ate:'informado'},
   {k:'cliente',   l:'Resposta do cliente', de:'informado', ate:'resposta'},
   {k:'esperaServ',l:'Espera p/ serviço',   de:'resposta', ate:'servIni', soAprovado:true},
   {k:'execucao',  l:'Execução do serviço', de:'servIni',  ate:'servFim'},
@@ -820,6 +821,10 @@ function aReceber(o){
 function contaCliente(o){
   var q=o.orcamento||{},av=avalValor(o);
   if(avalIsenta(o))return o.aprovado===false?'Retirada/avaliação isenta — nada a cobrar.':'Orçamento <b>'+money(q.total)+'</b> (retirada/avaliação isenta).';
+  if(!temPreco(o)){
+    if(o.aprovado===false)return avalPaga(o)?'A '+avalNome(o)+' de '+money(av)+' já foi paga — nada a cobrar.':'Cobrar a '+avalNome(o)+': <b>'+money(av)+'</b>.';
+    return avalPaga(o)?'A '+avalNome(o)+' de <b>'+money(av)+'</b> já foi paga: desconte do valor do orçamento.':'A '+avalNome(o)+' ('+money(av)+') ainda não foi paga.';
+  }
   if(o.aprovado===false)return avalPaga(o)?'Avaliação de '+money(av)+' já paga na entrada — nada a cobrar.':'Cobrar a avaliação: <b>'+money(av)+'</b>.';
   return avalPaga(o)?'Orçamento '+money(q.total)+' − avaliação paga '+money(av)+' = <b>'+money(aReceber(o))+' a pagar</b>'
     :'Orçamento <b>'+money(q.total)+'</b> (avaliação ainda não foi paga).';
@@ -1166,13 +1171,13 @@ function detalheHtml(o,midias){
     {k:'recebido',l:externa(o)?'Chegou na loja (recebido do técnico)':'Entrada na loja',quem:externa(o)?o.recebidoPor:o.atendente,dur:d.transito,durL:'trânsito'},
     {k:'orcIni',l:'Orçamento iniciado',quem:o.tecnicoOrc,dur:d.esperaOrc,durL:'espera'},
     {k:'orcFim',l:'Orçamento técnico finalizado',quem:o.tecnicoOrc,dur:d.orcamento,durL:'orçamento'},
-    {k:'informado',l:'Orçamento passado ao cliente',quem:o.informadoPor,dur:d.informar,durL:'até informar o cliente'},
+    {k:'informado',l:'Orçamento enviado ao cliente',quem:o.informadoPor,dur:d.preco,durL:'comercial até enviar'},
     {k:'resposta',l:o.aprovado===false?'Cliente NÃO aprovou':'Cliente aprovou',dur:d.cliente,durL:'resposta do cliente'}
   ];
   /* OS antigas não registraram quando o cliente foi informado. */
   if(!t.informado&&t.resposta)passos.splice(3,1);
-  /* OS abertas antes da etapa de preço pularam este passo. */
-  if(t.precificado||!t.resposta)passos.splice(3,0,{k:'precificado',l:'Preço definido pelo comercial',quem:o.comercial,dur:d.preco,durL:'precificação'});
+  /* Só OS da época em que o preço era colocado no app têm este passo separado. */
+  if(t.precificado&&t.precificado!==t.informado)passos.splice(3,0,{k:'precificado',l:'Preço definido pelo comercial',quem:o.comercial});
   if(externa(o))passos.unshift({k:'retirado',l:'Retirado na casa do cliente',quem:o.tecnicoExterno});
   if(o.aprovado!==false)passos.push(
     {k:'servIni',l:'Serviço iniciado',quem:o.tecnico,dur:d.esperaServ,durL:'espera'},
@@ -1227,7 +1232,7 @@ function detalheHtml(o,midias){
           +(avalPaga(o)&&o.aprovado!==false?'<dt>Avaliação paga</dt><dd>− '+money(avalValor(o))+'</dd><dt>A pagar</dt><dd><b>'+money(aReceber(o))+'</b></dd>':'')
           +(o.blingId&&q.itens?'<dt>Bling</dt><dd>'+(q.blingLancadoEm?'<span class="badge b-green">Itens lançados '+fmtDH(q.blingLancadoEm)+'</span>'
             :'<span class="badge b-red">Não lançado</span>'+(ehComercial()?' <button class="btn btn-g btn-sm" onclick="relancarBling(\''+o.id+'\')">Lançar no Bling</button>':'')+(q.blingErro?'<div class="sub">'+esc(q.blingErro)+'</div>':''))+'</dd>':'')
-        :'<dt>Preço</dt><dd><span class="badge b-orange">Aguardando o comercial</span></dd>')
+        :'<dt>Preço</dt><dd>'+(o.tempos.informado?'<span class="sub">no Bling</span>':'<span class="badge b-orange">Aguardando o comercial</span>')+'</dd>')
       +(o.obsResposta?'<dt>Obs. do cliente</dt><dd>'+esc(o.obsResposta)+'</dd>':'')
       +((q.historico||[]).length?'<dt>Alterações</dt><dd>'+q.historico.map(function(x){return fmtDH(x.em)+': '+money(x.de)+' → '+money(x.para);}).join('\n')+'</dd>'
         :q.editadoEm?'<dt>Preço editado em</dt><dd>'+fmtDH(q.editadoEm)+'</dd>':'')
@@ -1235,8 +1240,9 @@ function detalheHtml(o,midias){
       +'</dl><div class="sec">Fotos do problema</div>'+(midias?galeria(midias,'problema'):'<div class="sub">Carregando…</div>')
       +'<div style="display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap;margin-top:10px;">'
       +(ehManutencao()?'<button class="btn btn-g btn-sm" onclick="editarDiag(\''+o.id+'\')">✏️ Editar diagnóstico</button>':'')
-      +(!ehComercial()?'':temPreco(o)?'<button class="btn btn-g btn-sm" onclick="editarOrc(\''+o.id+'\')">💲 Editar preço</button>'
-        :o.etapa!=='aguardando_preco'?'<button class="btn btn-p btn-sm" onclick="precificar(\''+o.id+'\')">💲 Colocar preço</button>':'')+'</div></div>';
+      /* Botões "Colocar/Editar preço" fora da tela a pedido da loja: o preço é
+         feito no Bling. precificar() e editarOrc() continuam no código. */
+      +'</div></div>';
   }
   if(o.servico){
     h+='<div class="card"><h3>Serviço</h3><dl class="kv">'
@@ -1260,8 +1266,8 @@ function acoesHtml(o){
       +'<button class="btn btn-p btn-lg" onclick="receberDoTecnico(\''+id+'\')">📥 Recebi do técnico</button>';break;
     case'recebido':b='<button class="btn btn-p btn-lg" onclick="iniciarOrc(\''+id+'\')">🔧 Iniciar orçamento</button>';break;
     case'em_orcamento':b='<button class="btn btn-p btn-lg" onclick="finalizarOrc(\''+id+'\')">📋 Finalizar orçamento</button>';break;
-    case'aguardando_preco':b='<div class="info">A oficina terminou o orçamento técnico. O comercial coloca o preço e depois passa ao cliente.</div>'
-      +'<button class="btn btn-p btn-lg" onclick="precificar(\''+id+'\')">💲 Colocar preço</button>';break;
+    case'aguardando_preco':b='<div class="info">A manutenção terminou o orçamento técnico. Monte o preço no Bling, envie ao cliente e registre aqui.</div>'
+      +'<button class="btn btn-p btn-lg" onclick="orcamentoEnviado(\''+id+'\')">📤 Orçamento enviado ao cliente</button>';break;
     case'aguardando_aprovacao':b='<div class="info">'+(o.importado&&o.importado.situacaoBling&&o.tempos.informado&&o.tempos.informado===o.importado.em?'Orçamento passado ao cliente antes do app (importada do Bling). Aguardando a resposta.':o.tempos.informado?'Cliente informado em '+fmtDH(o.tempos.informado)+'. Aguardando a resposta.':'Passe o orçamento ao cliente e registre.')+'<br>'+contaCliente(o)
       +(o.prazos&&o.prazos.entrega?'<br>Previsão de término: <b>'+fmtData(o.prazos.entrega)+'</b>':'')+'</div>'
       +(o.tempos.informado?'':'<button class="btn btn-p btn-lg" style="margin-bottom:8px;" onclick="clienteInformado(\''+id+'\')">📞 Orçamento passado ao cliente</button>')
@@ -1441,7 +1447,9 @@ async function relancarBling(id){
     await avancar(id,{'orcamento.blingLancadoEm':Date.now(),'orcamento.blingErro':''},'Itens lançados no Bling');
   }catch(e){alert('Não foi possível lançar no Bling: '+e.message);}
 }
-function temPreco(o){var q=o.orcamento||{};return!!(o.tempos.precificado||q.precificadoEm||(q.itens&&q.itens.length));}
+/* Preço lançado pelo app (fluxo antigo). No fluxo atual o preço fica no Bling
+   e o envio ao cliente grava precificado = informado. */
+function temPreco(o){var q=o.orcamento||{},t=o.tempos||{};return!!(q.precificadoEm||(q.itens&&q.itens.length)||(t.precificado&&t.precificado!==t.informado));}
 function resumoTecnico(o){
   var q=o.orcamento||{};
   return'<div class="card" style="background:var(--surface2);box-shadow:none;"><dl class="kv">'
@@ -1535,6 +1543,24 @@ function editarOrc(id){
     await avancar(id,upd,r.blingLancadoEm?'Preço atualizado e relançado no Bling':'Preço atualizado');
   });
   renderItens();
+}
+/* Comercial monta o preço no Bling, envia ao cliente e só registra o envio:
+   a OS passa direto para "Aguardando aprovação". */
+function orcamentoEnviado(id){
+  var o=getOS(id);
+  passoSimples('Orçamento enviado ao cliente',resumoTecnico(o)
+    +'<div class="field"><label>Data e hora do envio ao cliente <span class="req">*</span></label><input type="datetime-local" id="ps-quando" value="'+toLocalInput(Date.now())+'"/></div>'
+    +'<div class="field"><label>Quem enviou <span class="req">*</span></label><input id="ps-quem" list="vendedores" value="'+esc(lerLocal('comercial')||lerLocal('atendente'))+'"/></div>'
+    +'<div class="field"><label>Como</label><select id="ps-como"><option>WhatsApp</option><option>Ligação</option><option>Pessoalmente</option><option>Outro</option></select></div>',
+    'Registrar envio',async function(){
+      var q=val('ps-quem');if(!q){psErro('Informe quem enviou o orçamento.');return false;}
+      var ms=new Date(val('ps-quando')).getTime(),t=getOS(id).tempos||{};
+      if(!val('ps-quando')||isNaN(ms)){psErro('Informe a data e hora do envio.');return false;}
+      if(ms>Date.now()+60000){psErro('A data de envio não pode ser no futuro.');return false;}
+      if(t.orcFim&&ms<t.orcFim-60000){psErro('O envio não pode ser antes do fim do orçamento técnico ('+fmtDH(t.orcFim)+').');return false;}
+      gravarLocal('comercial',q);
+      await avancar(id,{etapa:'aguardando_aprovacao','tempos.precificado':ms,'tempos.informado':ms,comercial:q,informadoPor:q,informadoComo:val('ps-como')},'Registrado — aguardando aprovação do cliente');
+    });
 }
 function clienteInformado(id){
   passoSimples('Orçamento passado ao cliente',
@@ -1637,8 +1663,8 @@ function apagarOS(id){
     });
   $('ps-ok').className='btn btn-no';
 }
-var NOMES_T={recebido:'Entrada na loja',orcIni:'Início do orçamento',orcFim:'Fim do orçamento',precificado:'Preço do comercial',informado:'Orçamento passado ao cliente',resposta:'Resposta do cliente',servIni:'Início do serviço',servFim:'Fim do serviço',entregue:'Entrega'};
-var ORDEM_T=['recebido','orcIni','orcFim','precificado','informado','resposta','servIni','servFim','entregue'];
+var NOMES_T={retirado:'Retirada na casa do cliente',recebido:'Entrada na loja',orcIni:'Início do orçamento',orcFim:'Fim do orçamento',precificado:'Preço do comercial',informado:'Orçamento enviado ao cliente',resposta:'Resposta do cliente',servIni:'Início do serviço',servFim:'Fim do serviço',entregue:'Entrega'};
+var ORDEM_T=['retirado','recebido','orcIni','orcFim','precificado','informado','resposta','servIni','servFim','entregue'];
 function ajustarHora(id,k){
   var o=getOS(id);
   passoSimples('Ajustar horário','<div class="field"><label>'+esc(NOMES_T[k])+'</label><input type="datetime-local" id="ps-dh" value="'+toLocalInput(o.tempos[k])+'"/></div>'
@@ -1646,10 +1672,13 @@ function ajustarHora(id,k){
       var v=val('ps-dh');var ms=new Date(v).getTime();
       if(!v||isNaN(ms)){psErro('Data inválida.');return false;}
       var i=ORDEM_T.indexOf(k),t=o.tempos;
-      for(var a=i-1;a>=0;a--)if(t[ORDEM_T[a]]){if(ms<t[ORDEM_T[a]]){psErro('Não pode ser antes de "'+NOMES_T[ORDEM_T[a]]+'" ('+fmtDH(t[ORDEM_T[a]])+').');return false;}break;}
+      /* Envio do orçamento registrado de uma vez: preço e envio andam juntos. */
+      var ligado=k==='informado'&&t.precificado&&t.precificado===t.informado;
+      for(var a=i-1;a>=0;a--)if(t[ORDEM_T[a]]&&!(ligado&&ORDEM_T[a]==='precificado')){if(ms<t[ORDEM_T[a]]){psErro('Não pode ser antes de "'+NOMES_T[ORDEM_T[a]]+'" ('+fmtDH(t[ORDEM_T[a]])+').');return false;}break;}
       for(var b=i+1;b<ORDEM_T.length;b++)if(t[ORDEM_T[b]]){if(ms>t[ORDEM_T[b]]){psErro('Não pode ser depois de "'+NOMES_T[ORDEM_T[b]]+'" ('+fmtDH(t[ORDEM_T[b]])+').');return false;}break;}
       var upd={};upd['tempos.'+k]=ms;
-      if(k==='recebido')upd.criadoEm=ms;
+      if(ligado)upd['tempos.precificado']=ms;
+      if(k==='recebido'&&!externa(o)||k==='retirado')upd.criadoEm=ms;
       await avancar(id,upd,'Horário ajustado');
       if(k==='servFim')datasBling(id,{dataConclusao:isoDia(new Date(ms))});
       if(k==='entregue')datasBling(id,{dataSaida:isoDia(new Date(ms))});
@@ -2049,18 +2078,19 @@ function vPainel(){
   h+='<div class="card"><h3>Por técnico</h3>'+(nt.length?'<div class="tw"><table><thead><tr><th>Técnico</th><th>Orçamentos</th><th>Tempo médio orçamento</th><th>Serviços</th><th>Tempo médio execução</th><th>Serviços no prazo</th></tr></thead><tbody>'
     +nt.map(function(n){var x=tecs[n];return'<tr><td><b>'+esc(n)+'</b></td><td>'+x.orc.length+'</td><td>'+fmtDur(media(x.orc))+'</td><td>'+x.exe.length+'</td><td>'+fmtDur(media(x.exe))+'</td><td>'+(x.pz?Math.round((x.ok||0)/x.pz*100)+'% ('+(x.ok||0)+' de '+x.pz+')':'-')+'</td></tr>';}).join('')
     +'</tbody></table></div>':'<div class="sub">Ainda sem orçamentos ou serviços finalizados no período.</div>')+'</div>';
-  /* Comercial: do orçamento técnico pronto até o preço, e até o envio ao cliente. */
+  /* Comercial: do orçamento técnico pronto até o envio ao cliente (o preço é
+     montado no Bling, no meio desse tempo). */
   var coms={};
   per.forEach(function(o){
-    var d=duracoes(o),t=o.tempos||{};if(!o.comercial)return;
-    var c=coms[o.comercial]=coms[o.comercial]||{preco:[],envio:[]};
-    if(d.preco!=null)c.preco.push(d.preco);
-    if(t.orcFim&&t.informado)c.envio.push(t.informado-t.orcFim);
+    var t=o.tempos||{},quem=o.informadoPor||o.comercial;if(!quem||!t.orcFim||!t.informado)return;
+    var c=coms[quem]=coms[quem]||{envio:[],pz:0,ok:0};
+    c.envio.push(t.informado-t.orcFim);
+    if(o.prazos&&o.prazos.orcamento){c.pz++;if(t.informado<=fimDoDia(o.prazos.orcamento))c.ok++;}
   });
   var nc=Object.keys(coms).sort();
-  h+='<div class="card"><h3>Por comercial</h3>'+(nc.length?'<div class="tw"><table><thead><tr><th>Comercial</th><th>Orçamentos precificados</th><th>Tempo médio p/ colocar preço</th><th>Tempo médio até enviar ao cliente</th></tr></thead><tbody>'
-    +nc.map(function(n){var c=coms[n];return'<tr><td><b>'+esc(n)+'</b></td><td>'+c.preco.length+'</td><td>'+fmtDur(media(c.preco))+'</td><td>'+fmtDur(media(c.envio))+'</td></tr>';}).join('')
-    +'</tbody></table></div><div class="hint">Os tempos contam a partir de quando o técnico finalizou o orçamento.</div>':'<div class="sub">Ainda sem orçamentos precificados no período.</div>')+'</div>';
+  h+='<div class="card"><h3>Por comercial</h3>'+(nc.length?'<div class="tw"><table><thead><tr><th>Comercial</th><th>Orçamentos enviados</th><th>Tempo médio até enviar ao cliente</th><th>Enviados no prazo</th></tr></thead><tbody>'
+    +nc.map(function(n){var c=coms[n];return'<tr><td><b>'+esc(n)+'</b></td><td>'+c.envio.length+'</td><td>'+fmtDur(media(c.envio))+'</td><td>'+(c.pz?Math.round(c.ok/c.pz*100)+'% ('+c.ok+' de '+c.pz+')':'-')+'</td></tr>';}).join('')
+    +'</tbody></table></div><div class="hint">Os tempos contam a partir de quando o técnico finalizou o orçamento.</div>':'<div class="sub">Ainda sem orçamentos enviados no período.</div>')+'</div>';
   /* Paradas */
   h+='<div class="card"><h3>OS paradas há mais tempo que o normal</h3>'+(paradas.length?'<div class="tw"><table><thead><tr><th>OS</th><th>Cliente</th><th>Etapa</th><th>Há</th></tr></thead><tbody>'
     +paradas.map(function(o){return'<tr style="cursor:pointer" onclick="abrirOS(\''+o.id+'\')"><td><b>'+esc(o.numero||'-')+'</b></td><td>'+esc(o.cliente&&o.cliente.nome||'-')+'</td><td>'+etapaBadge(o.etapa)+'</td><td class="late">'+fmtDur(desdeEtapa(o))+'</td></tr>';}).join('')
