@@ -252,6 +252,15 @@ function questHtml(px,resp){
       +'<input id="'+px+'-q'+i+'-obs" placeholder="Observação (opcional)" style="margin-top:6px;font-size:13px;" value="'+esc(obs)+'"/></div>';
   }).join('');
 }
+/* Garantia/retorno e voltagem: escolha única, obrigatória na entrada. */
+var GARANTIA=['Sim','Não'],VOLTAGENS=['127V','220V'];
+function escolhaHtml(id,rot,ops,atual){
+  return'<div class="field"><label>'+esc(rot)+' <span class="req">*</span></label><div class="opts" id="'+id+'">'
+    +ops.map(function(op){return'<button type="button" class="chip'+(op===atual?' on':'')+'" data-v="'+esc(op)+'" onclick="escolher(this)">'+esc(op)+'</button>';}).join('')+'</div></div>';
+}
+function escolher(btn){Array.prototype.forEach.call(btn.parentNode.children,function(b){b.classList.toggle('on',b===btn);});}
+function escolhaVal(id){var b=$(id)&&$(id).querySelector('.on');return b?b.getAttribute('data-v'):'';}
+function garantiaTxt(o){return o.garantia==='Sim'?'Garantia/retorno':'';}
 function qSel(px,i,btn){
   var box=$(px+'-q'+i);
   Array.prototype.forEach.call(box.children,function(b){b.classList.toggle('on',b===btn);});
@@ -715,7 +724,8 @@ function cardOS(o,agrupado){
     h+='<div class="card os'+(prazoVencido(o)?' os-late':'')+'" onclick="abrirOS(\''+o.id+'\')">'
       +'<div class="os-num">'+esc(o.numero||'s/ nº')+'</div>'
       +'<div class="os-main"><div class="t">'+esc(o.cliente&&o.cliente.nome||'-')+'</div>'
-      +'<div class="s os-ap">'+esc(aparelho(o))+(o.cor?' · <b>'+esc(o.cor)+'</b>':'')+'</div>'
+      +'<div class="s os-ap">'+esc(aparelho(o))+(o.cor?' · <b>'+esc(o.cor)+'</b>':'')+(o.voltagem?' · '+esc(o.voltagem):'')+'</div>'
+      +(o.garantia==='Sim'?'<div><span class="badge b-red">🔁 Garantia / retorno</span></div>':'')
       +(o.tecnico?'<div class="s">'+esc(o.tecnico)+'</div>':'')
       +(externa(o)?'<div class="tag-ext">🚚 Retirada na casa do cliente'+(o.tecnicoExterno&&!ehExterno()?' · '+esc(o.tecnicoExterno):'')+'</div>':'')+'</div>'
       +'<div class="os-side">'+(agrupado?'':etapaBadge(o.etapa))
@@ -934,6 +944,7 @@ function novaOS(externa){
     +'<div class="g2"><div class="field"><label>Marca <span class="req">*</span></label><input id="nv-marca" placeholder="Ex: Electrolux"/></div>'
     +'<div class="field"><label>Modelo <span class="req">*</span></label><input id="nv-modelo" placeholder="Ex: PA30G"/></div></div>'
     +'<div class="field"><label>Cor</label><input id="nv-cor" list="cores" placeholder="Ex: branco, preto, prata"/></div>'
+    +'<div class="g2">'+escolhaHtml('nv-garantia','É garantia / retorno?',GARANTIA,'')+escolhaHtml('nv-volt','Voltagem',VOLTAGENS,'')+'</div>'
     +'<div class="g2"><div class="field"><label>Nº de série</label><input id="nv-serie"/></div>'
     +'<div class="field"><label>Condição de limpeza</label><select id="nv-cond"><option value="">Selecione…</option>'+cond+'</select></div></div>'
     +'<div class="field"><label>Acessórios que vieram junto</label><input id="nv-acess" placeholder="Ex: refil, bandeja, mangueira, fonte…"/></div>'
@@ -1062,7 +1073,7 @@ async function salvarNovaOS(){
   var cli=NV.contato?{nome:NV.contato.nome,blingId:NV.contato.id,documento:NV.contato.documento||'',telefone:val('nv-tel')}
                     :{nome:val('nv-nome'),documento:val('nv-doc'),telefone:val('nv-tel'),blingId:null};
   var os={
-    cliente:cli,marca:val('nv-marca'),modelo:val('nv-modelo'),cor:val('nv-cor'),nSerie:val('nv-serie'),condicao:val('nv-cond'),
+    cliente:cli,marca:val('nv-marca'),modelo:val('nv-modelo'),cor:val('nv-cor'),nSerie:val('nv-serie'),garantia:escolhaVal('nv-garantia'),voltagem:escolhaVal('nv-volt'),condicao:val('nv-cond'),
     acessorios:val('nv-acess'),problema:val('nv-prob'),atendente:val('nv-atend'),prazos:NV.externa?{}:{orcamento:val('nv-prazo')}
   };
   var ret=document.querySelector('input[name="nv-ret"]:checked');
@@ -1072,6 +1083,8 @@ async function salvarNovaOS(){
   if(!NV.contato&&!cli.telefone)falta.push('celular');
   if(!os.marca)falta.push('marca');
   if(!os.modelo)falta.push('modelo');
+  if(!os.garantia)falta.push('se é garantia/retorno');
+  if(!os.voltagem)falta.push('voltagem');
   if(!os.problema)falta.push('problema relatado');
   if(NV.externa&&!os.tecnicoExterno)falta.push('técnico que retirou');
   if(!os.atendente)falta.push(NV.externa?'vendedor responsável':'vendedor que recebeu');
@@ -1106,7 +1119,7 @@ async function salvarNovaOS(){
         chave:NV.chave,vendedorId:os.vendedorId||null,
         contato:cli.blingId?{id:cli.blingId}:{nome:cli.nome,telefone:cli.telefone,documento:cli.documento},
         equipamento:[aparelho(os),os.cor].filter(Boolean).join(' '),numeroSerie:os.nSerie,descricaoProblema:os.problema,dataPrevista:os.prazos.orcamento||'',
-        observacoes:[NV.externa?'Retirado na casa do cliente pelo técnico '+os.tecnicoExterno+'.':'',os.questionario,os.acessorios?'Acessórios: '+os.acessorios:'',os.condicao?'Condição: '+os.condicao:''].filter(Boolean).join('\n\n')
+        observacoes:[os.garantia==='Sim'?'GARANTIA / RETORNO':'',NV.externa?'Retirado na casa do cliente pelo técnico '+os.tecnicoExterno+'.':'','Voltagem: '+os.voltagem,os.questionario,os.acessorios?'Acessórios: '+os.acessorios:'',os.condicao?'Condição: '+os.condicao:''].filter(Boolean).join('\n\n')
       })});
       var j=await r.json().catch(function(){return{};});
       if(!r.ok||!j.id)throw{bling:true,message:j.error||('HTTP '+r.status)};
@@ -1202,7 +1215,8 @@ function detalheHtml(o,midias){
     +'<dt>Cliente</dt><dd>'+esc(c.nome||'-')+'</dd>'
     +'<dt>Telefone</dt><dd>'+esc(c.telefone||'-')+'</dd>'
     +(c.documento?'<dt>CPF/CNPJ</dt><dd>'+esc(c.documento)+'</dd>':'')
-    +'<dt>Aparelho</dt><dd>'+esc(aparelho(o))+(o.cor?' · '+esc(o.cor):'')+(o.nSerie?' · série '+esc(o.nSerie):'')+'</dd>'
+    +'<dt>Aparelho</dt><dd>'+esc(aparelho(o))+(o.cor?' · '+esc(o.cor):'')+(o.voltagem?' · '+esc(o.voltagem):'')+(o.nSerie?' · série '+esc(o.nSerie):'')+'</dd>'
+    +(o.garantia?'<dt>Garantia/retorno</dt><dd>'+(o.garantia==='Sim'?'<span class="badge b-red">Sim — garantia/retorno</span>':'Não')+'</dd>':'')
     +(o.condicao?'<dt>Condição</dt><dd>'+esc(o.condicao)+'</dd>':'')
     +(o.acessorios?'<dt>Acessórios</dt><dd>'+esc(o.acessorios)+'</dd>':'')
     +'<dt>Problema relatado</dt><dd>'+esc(o.problema||'-')+'</dd>'
@@ -1712,6 +1726,7 @@ function editarRecepcao(id){
     +'<div class="g2"><div class="field"><label>Marca</label><input id="ed-marca" value="'+esc(o.marca||'')+'"/></div>'
     +'<div class="field"><label>Modelo</label><input id="ed-modelo" value="'+esc(o.modelo||'')+'"/></div></div>'
     +'<div class="field"><label>Cor</label><input id="ed-cor" list="cores" value="'+esc(o.cor||'')+'"/></div>'
+    +'<div class="g2">'+escolhaHtml('ed-garantia','É garantia / retorno?',GARANTIA,o.garantia||'')+escolhaHtml('ed-volt','Voltagem',VOLTAGENS,o.voltagem||'')+'</div>'
     +'<div class="g2"><div class="field"><label>Nº de série</label><input id="ed-serie" value="'+esc(o.nSerie||'')+'"/></div>'
     +'<div class="field"><label>Condição</label><select id="ed-cond"><option value="">-</option>'+cond+'</select></div></div>'
     +'<div class="field"><label>Acessórios</label><input id="ed-acess" value="'+esc(o.acessorios||'')+'"/></div>'
@@ -1723,7 +1738,7 @@ function editarRecepcao(id){
       if(qz&&qz.falta.length){psErro('Responda a pergunta '+qz.falta.join(', ')+' do questionário.');return false;}
       var qupd=qz?{respostas:qz.respostas,questionario:questTexto(qz.respostas)}:{questionario:val('ed-quest')};
       await avancar(id,Object.assign(qupd,{numero:val('ed-num'),'cliente.nome':val('ed-nome'),'cliente.telefone':val('ed-tel'),marca:val('ed-marca'),modelo:val('ed-modelo'),cor:val('ed-cor'),
-        nSerie:val('ed-serie'),condicao:val('ed-cond'),acessorios:val('ed-acess'),problema:val('ed-prob')},externa(o)&&val('ed-tecext')?{tecnicoExterno:val('ed-tecext')}:{}),'Dados atualizados');
+        nSerie:val('ed-serie'),garantia:escolhaVal('ed-garantia'),voltagem:escolhaVal('ed-volt'),condicao:val('ed-cond'),acessorios:val('ed-acess'),problema:val('ed-prob')},externa(o)&&val('ed-tecext')?{tecnicoExterno:val('ed-tecext')}:{}),'Dados atualizados');
       /* Equipamento (marca, modelo e cor) e nº de série também na OS do Bling. */
       var eqAntes=equipBling(o),eqDepois=[[val('ed-marca'),val('ed-modelo')].join(' ').trim()||'Purificador',val('ed-cor')].filter(Boolean).join(' ');
       if(o.blingId&&(eqAntes!==eqDepois||(o.nSerie||'')!==val('ed-serie')))equipParaBling(id,{equipamento:eqDepois,numeroSerie:val('ed-serie')});
@@ -1960,7 +1975,8 @@ function montarPdfEntrada(o,fotos){
   line('Nome',c.nome);line('Telefone',c.telefone);line('CPF/CNPJ',c.documento);
   if(ext)line('Retirado por',o.tecnicoExterno);
   section('Aparelho');
-  line('Purificador',aparelho(o));line('Cor',o.cor);line('N° de série',o.nSerie);
+  line('Purificador',aparelho(o));line('Cor',o.cor);line('Voltagem',o.voltagem);line('N° de série',o.nSerie);
+  if(o.garantia)line('Garantia / retorno',o.garantia);
   if(o.prazos&&o.prazos.orcamento)line('Previsão do orçamento',fmtData(o.prazos.orcamento));
   line('Condição de limpeza',o.condicao);line('Acessórios entregues',o.acessorios||'Nenhum');
   section('Problema relatado pelo cliente');
