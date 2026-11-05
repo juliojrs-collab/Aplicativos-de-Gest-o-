@@ -107,6 +107,12 @@ main{max-width:1100px;margin:0 auto;padding:16px 16px 96px;}
 .imp-row input{width:20px;height:20px;flex:none;}
 .imp-row>div{flex:1;min-width:0;font-size:13px;}
 .imp-off{opacity:.5;}
+.cam-full{position:fixed;inset:0;z-index:85;background:#000;display:flex;flex-direction:column;}
+.cam-full video{flex:1;min-height:0;width:100%;object-fit:contain;background:#000;}
+.cam-bar{display:flex;gap:10px;align-items:center;justify-content:space-between;padding:12px 16px calc(14px + env(safe-area-inset-bottom));background:#000;}
+.cam-shot{width:74px;height:74px;border-radius:50%;border:5px solid #fff;background:rgba(255,255,255,.25);}
+.cam-shot:active{background:#fff;}
+.cam-info{color:#fff;font-size:13px;text-align:center;padding:8px;}
 .alertas{position:fixed;bottom:84px;left:0;right:0;z-index:45;display:flex;flex-direction:column-reverse;gap:8px;align-items:center;padding:0 10px;pointer-events:none;}
 .alerta{pointer-events:auto;width:100%;max-width:560px;background:#fff8e1;border:2px solid var(--amber);border-radius:var(--r);box-shadow:var(--sh2);padding:10px 12px;display:flex;gap:10px;align-items:center;cursor:pointer;animation:alin .3s ease-out;}
 .alerta b{display:block;font-size:14px;}
@@ -513,14 +519,62 @@ function pickFile(accept,camera,cb){
 }
 function addFoto(camera){
   if(F.fotos.length>=F.maxFotos){toast('Máximo de '+F.maxFotos+' fotos');return;}
+  /* Câmera dentro da página: abrir o app de câmera do celular fazia o
+     navegador recarregar a página e o formulário voltava vazio. */
+  if(camera&&navigator.mediaDevices&&navigator.mediaDevices.getUserMedia){abrirCamera();return;}
   pickFile('image/*',camera,async function(files){
     for(var i=0;i<files.length&&F.fotos.length<F.maxFotos;i++){
       try{F.fotos.push(await compressImg(files[i]));}catch(e){toast(e.message);}
     }
-    renderMidiaForm();
+    renderMidiaForm();salvarRascunho();
   });
 }
-function rmFoto(i){F.fotos.splice(i,1);renderMidiaForm();}
+function rmFoto(i){F.fotos.splice(i,1);renderMidiaForm();salvarRascunho();}
+var CAM=null;
+async function abrirCamera(){
+  var ov=document.createElement('div');ov.className='cam-full';ov.id='cam-full';
+  ov.innerHTML='<video id="cam-v" autoplay playsinline muted></video><div class="cam-info" id="cam-info">Abrindo a câmera…</div>'
+    +'<div class="cam-bar"><button class="btn btn-g" onclick="fecharCamera()">Concluir</button>'
+    +'<button class="cam-shot" id="cam-shot" aria-label="Tirar foto" onclick="capturarFoto()"></button>'
+    +'<button class="btn btn-g" onclick="trocarCamera()">🔄</button></div>';
+  document.body.appendChild(ov);
+  CAM={face:'environment',stream:null};
+  await ligarCamera();
+}
+async function ligarCamera(){
+  if(!CAM)return;
+  if(CAM.stream)CAM.stream.getTracks().forEach(function(t){t.stop();});
+  try{
+    CAM.stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:CAM.face,width:{ideal:1920},height:{ideal:1080}},audio:false});
+    var v=$('cam-v');v.srcObject=CAM.stream;await v.play().catch(function(){});
+    infoCamera();
+  }catch(e){
+    /* Sem permissão ou sem câmera: volta ao jeito antigo. */
+    fecharCamera();
+    toast('Não consegui abrir a câmera aqui ('+(e.name||e.message)+'). Usando a câmera do celular.');
+    pickFile('image/*',true,async function(files){
+      for(var i=0;i<files.length&&F.fotos.length<F.maxFotos;i++){try{F.fotos.push(await compressImg(files[i]));}catch(x){toast(x.message);}}
+      renderMidiaForm();salvarRascunho();
+    });
+  }
+}
+function infoCamera(){var el=$('cam-info');if(el)el.textContent=F.fotos.length+' de '+F.maxFotos+' fotos · toque no botão branco para fotografar';}
+function trocarCamera(){if(!CAM)return;CAM.face=CAM.face==='environment'?'user':'environment';ligarCamera();}
+function capturarFoto(){
+  var v=$('cam-v');if(!v||!v.videoWidth)return;
+  if(F.fotos.length>=F.maxFotos){toast('Máximo de '+F.maxFotos+' fotos');return;}
+  var M=1280,w=v.videoWidth,h=v.videoHeight;
+  if(w>M||h>M){if(w>h){h=Math.round(h*M/w);w=M;}else{w=Math.round(w*M/h);h=M;}}
+  var c=document.createElement('canvas');c.width=w;c.height=h;c.getContext('2d').drawImage(v,0,0,w,h);
+  F.fotos.push(c.toDataURL('image/jpeg',0.7));
+  var ov=$('cam-full');if(ov){ov.style.opacity='.4';setTimeout(function(){ov.style.opacity='';},120);}
+  renderMidiaForm();salvarRascunho();infoCamera();
+  if(F.fotos.length>=F.maxFotos)fecharCamera();
+}
+function fecharCamera(){
+  if(CAM&&CAM.stream)CAM.stream.getTracks().forEach(function(t){t.stop();});
+  CAM=null;var ov=$('cam-full');if(ov)ov.remove();
+}
 function rmVideo(i){F.videos.splice(i,1);renderMidiaForm();}
 function addVideo(camera){
   if(F.videos.length>=F.maxVideos){toast('Máximo de '+F.maxVideos+' vídeos');return;}
@@ -878,11 +932,15 @@ async function confirmarImportacao(){
 
 /* ═══ Modal ══════════════════════════════════════════════════════════════ */
 function modal(titulo,corpo){
-  $('modal').innerHTML='<div class="ov" onclick="if(event.target===this)fecharModal()"><div class="mdl"><div class="mdl-h"><h3>'+titulo+'</h3><button class="mdl-x" onclick="fecharModal()">✕</button></div><div id="mdl-b">'+corpo+'</div></div></div>';
+  $('modal').innerHTML='<div class="ov" onclick="if(event.target===this&&S.modo!==\'nova\')fecharModal()"><div class="mdl"><div class="mdl-h"><h3>'+titulo+'</h3><button class="mdl-x" onclick="fecharModal()">✕</button></div><div id="mdl-b">'+corpo+'</div></div></div>';
   document.body.style.overflow='hidden';
 }
-function fecharModal(){
+function fecharModal(salvo){
   if(F.enviandoVideo&&!confirm('Um vídeo ainda está sendo enviado. Fechar mesmo assim?'))return;
+  if(S.modo==='nova'){
+    if(!salvo&&rascunhoTemDados()&&!confirm('Fechar o formulário? O que foi preenchido será descartado.'))return;
+    apagarRascunho();
+  }
   $('modal').innerHTML='';document.body.style.overflow='';S.abertaId=null;S.modo=null;
 }
 
@@ -997,7 +1055,7 @@ function renderAssinNV(){
     :'<button type="button" class="btn btn-p btn-lg" style="margin-bottom:12px;" onclick="assinarNV()">✍️ Cliente assinar</button>';
 }
 function assinarNV(){
-  abrirTelaAssin(val('nv-nome')||(NV.contato&&NV.contato.nome)||'',function(a){NV.assin=a;renderAssinNV();},NV.externa?TERMO_RETIRADA:TERMO_ENTRADA);
+  abrirTelaAssin(val('nv-nome')||(NV.contato&&NV.contato.nome)||'',function(a){NV.assin=a;renderAssinNV();salvarRascunho();},NV.externa?TERMO_RETIRADA:TERMO_ENTRADA);
 }
 function colherAssinatura(id){
   var o=getOS(id);
@@ -1008,11 +1066,60 @@ function colherAssinatura(id){
 }
 
 /* ═══ Recepção: nova OS ══════════════════════════════════════════════════ */
+/* ═══ Rascunho do recebimento ════════════════════════════════════════════
+   O formulário de entrada/retirada é salvo no próprio aparelho a cada
+   alteração. Se a página recarregar (o celular fecha o navegador ao abrir a
+   câmera ou a galeria quando falta memória), o app reabre o formulário com
+   tudo o que já tinha sido preenchido, fotos e assinatura inclusive. */
+var RASC_K='oficina_rascunho_os',_rascT=null;
+function lerRascunho(){try{var r=JSON.parse(localStorage.getItem(RASC_K)||'null');return r&&Date.now()-r.em<12*3600000?r:null;}catch(e){return null;}}
+function apagarRascunho(){clearTimeout(_rascT);try{localStorage.removeItem(RASC_K);}catch(e){}}
+function rascunhoTemDados(){
+  if(F.fotos.length||NV.assin||NV.contato)return true;
+  var b=$('mdl-b');if(!b)return false;
+  return Array.prototype.some.call(b.querySelectorAll('input[id^="nv-"]:not([type=checkbox]):not([type=radio]),textarea[id^="nv-"]'),function(e){return e.value&&e.id!=='nv-prazo'&&e.id!=='nv-atend'&&e.id!=='nv-tecext';})
+    ||!!b.querySelector('.opts .chip.on');
+}
+function salvarRascunho(){
+  if(S.modo!=='nova')return;
+  clearTimeout(_rascT);
+  _rascT=setTimeout(function(){
+    var b=$('mdl-b');if(!b||S.modo!=='nova')return;
+    var campos={},escolhas={},r=document.querySelector('input[name="nv-ret"]:checked');
+    b.querySelectorAll('input[id^="nv-"],textarea[id^="nv-"],select[id^="nv-"]').forEach(function(e){if(e.type==='checkbox')campos[e.id]=e.checked;else if(e.type!=='radio')campos[e.id]=e.value;});
+    b.querySelectorAll('.opts[id^="nv-"]').forEach(function(o){var on=o.querySelector('.chip.on');if(on)escolhas[o.id]=on.getAttribute('data-v');});
+    var d={em:Date.now(),setor:S.setor,externa:!!NV.externa,chave:NV.chave,manual:NV.manual,contato:NV.contato,assin:NV.assin||null,
+      campos:campos,escolhas:escolhas,ret:r?r.value:'',fotos:F.fotos.slice()};
+    try{localStorage.setItem(RASC_K,JSON.stringify(d));}
+    catch(e){try{d.fotos=[];d.semFotos=true;localStorage.setItem(RASC_K,JSON.stringify(d));}catch(x){}}
+  },400);
+}
+function restaurarRascunho(d){
+  NV.chave=d.chave||NV.chave;NV.manual=!!d.manual;NV.contato=d.contato||null;NV.assin=d.assin||null;
+  F.fotos=(d.fotos||[]).slice();
+  renderCliente();renderNumero();renderMidiaForm();renderAssinNV();
+  Object.keys(d.escolhas||{}).forEach(function(id){
+    var o=$(id);if(!o)return;
+    Array.prototype.forEach.call(o.children,function(c){if(c.getAttribute('data-v')===d.escolhas[id])c.click();});
+  });
+  Object.keys(d.campos||{}).forEach(function(id){
+    var e=$(id);if(!e)return;
+    if(e.type==='checkbox')e.checked=!!d.campos[id];else e.value=d.campos[id];
+    if(/-outro$/.test(id)&&e.value)e.style.display='';
+  });
+  if(d.ret){var r=document.querySelector('input[name="nv-ret"][value="'+d.ret+'"]');if(r)r.checked=true;}
+  toast('Formulário recuperado'+(d.semFotos?' (refaça as fotos)':'')+' — continue de onde parou');
+}
+/* Qualquer digitação ou toque no formulário salva o rascunho. */
+['input','click','change'].forEach(function(ev){
+  document.addEventListener(ev,function(e){if(S.modo==='nova'&&e.target.closest&&e.target.closest('#mdl-b'))salvarRascunho();},true);
+});
+
 var NV={};
 /* externa=true: técnico da manutenção externa retirando na casa do cliente.
    Mesmo formulário, com técnico + vendedor responsável, taxa de retirada e
    sem previsão do orçamento (o comercial já combinou com o cliente). */
-function novaOS(externa){
+function novaOS(externa,rasc){
   S.modo='nova';
   carregarClientes();if(!VENDEDORES.length)carregarVendedores();
   NV={contato:null,chave:uid(),manual:false,externa:!!externa};
@@ -1054,6 +1161,7 @@ function novaOS(externa){
     +'<div id="nv-err"></div>'
     +'<button class="btn btn-p btn-lg" id="nv-ok" onclick="salvarNovaOS()">'+(externa?'Registrar retirada':'Registrar entrada')+'</button>');
   renderCliente();renderNumero();renderMidiaForm();renderAssinNV();
+  if(rasc)restaurarRascunho(rasc);else apagarRascunho();
 }
 function lerLocal(k){try{return localStorage.getItem('oficina_'+k)||'';}catch(e){return'';}}
 function gravarLocal(k,v){try{localStorage.setItem('oficina_'+k,v);}catch(e){}}
@@ -1140,7 +1248,7 @@ async function buscarNoBling(q){
     carregarClientes(true);
   }catch(e){if(meu===_bq&&box)box.innerHTML='<div class="err">Não consegui buscar no Bling: '+esc(e.message)+'</div>';}
 }
-function escolherCliente(i){NV.contato=NV._sug[i];renderCliente();}
+function escolherCliente(i){NV.contato=NV._sug[i];renderCliente();salvarRascunho();}
 function renderNumero(){
   var el=$('nv-num');if(!el)return;
   el.innerHTML=NV.manual
@@ -1219,7 +1327,7 @@ async function salvarNovaOS(){
     await salvarMidias(ref.id,'entrada',F.fotos,[]);
     if(os.atendente)gravarLocal('atendente',os.atendente);
     if(os.tecnicoExterno){gravarLocal('tecExterno',os.tecnicoExterno);S.tecExt=os.tecnicoExterno;}
-    F.fotos=[];fecharModal();
+    F.fotos=[];fecharModal(true);
     toast((NV.externa?'Retirada registrada — ':'Entrada registrada — ')+osLabel(os));
     abrirOS(ref.id);
   }catch(e){
@@ -2233,6 +2341,8 @@ if(initFirebase())listen();
 /* Pré-carrega vendedores e a lista de clientes para o recebimento abrir pronto. */
 carregarVendedores();carregarClientes();
 netStatus();render();
+/* Página recarregou com um recebimento pela metade: reabre onde parou. */
+(function(){var d=lerRascunho();if(!d||!d.setor)return;S.setor=d.setor;S.view='lista';render();novaOS(d.externa,d);})();
 </script>
 </body>
 </html>
