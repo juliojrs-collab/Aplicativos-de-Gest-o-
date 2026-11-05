@@ -107,6 +107,13 @@ main{max-width:1100px;margin:0 auto;padding:16px 16px 96px;}
 .imp-row input{width:20px;height:20px;flex:none;}
 .imp-row>div{flex:1;min-width:0;font-size:13px;}
 .imp-off{opacity:.5;}
+.alertas{position:fixed;bottom:84px;left:0;right:0;z-index:45;display:flex;flex-direction:column-reverse;gap:8px;align-items:center;padding:0 10px;pointer-events:none;}
+.alerta{pointer-events:auto;width:100%;max-width:560px;background:#fff8e1;border:2px solid var(--amber);border-radius:var(--r);box-shadow:var(--sh2);padding:10px 12px;display:flex;gap:10px;align-items:center;cursor:pointer;animation:alin .3s ease-out;}
+.alerta b{display:block;font-size:14px;}
+.alerta .sub{font-size:12px;}
+.alerta .x{background:none;border:none;font-size:20px;color:var(--text3);margin-left:auto;padding:0 4px;}
+@keyframes alin{from{transform:translateY(30px);opacity:0}to{transform:none;opacity:1}}
+.nova{background:var(--amber);color:#fff;}
 .t-row{display:flex;gap:8px;align-items:center;justify-content:space-between;}
 .t-row .t{min-width:0;}
 .vend{flex:none;font-size:11px;font-weight:700;color:var(--blue-dark);background:var(--blue-light);border-radius:20px;padding:3px 9px;white-space:nowrap;}
@@ -202,7 +209,7 @@ th{font-size:11px;color:var(--text2);text-transform:uppercase;}
   <div class="tabs" id="tabs"></div>
 </div>
 <main id="app"><div class="empty">Carregando…</div></main>
-<div id="modal"></div>
+<div id="modal"></div><div class="alertas" id="alertas"></div>
 <datalist id="vendedores"></datalist><datalist id="tecnicos-ext"></datalist>
 <datalist id="cores"><option>Branco</option><option>Preto</option><option>Prata</option><option>Inox</option><option>Cinza</option><option>Grafite</option><option>Azul</option><option>Vermelho</option></datalist>
 <script>
@@ -370,7 +377,9 @@ function initFirebase(){
 }
 function listen(){
   unsub.push(db.collection(C_OS).orderBy('criadoEm','desc').limit(1000).onSnapshot(function(snap){
+    var antes={},jaTinha=S.loaded&&!S.dbErr;S.os.forEach(function(o){antes[o.id]=o.etapa;});
     S.os=snap.docs.map(function(d){var o=d.data();o.id=d.id;o.tempos=o.tempos||{};return o;});
+    if(jaTinha)verAlertas(antes);
     S.loaded=true;S.dbErr='';render();if(S.modo==='detalhe')refreshDetalhe();
   },function(err){S.dbErr='Erro ao ler as OS: '+err.message;S.loaded=true;render();}));
   unsub.push(db.collection(C_TEC).onSnapshot(function(snap){
@@ -543,6 +552,68 @@ function abrirMidia(i){
   document.body.appendChild(el);
 }
 
+/* ═══ Alertas ════════════════════════════════════════════════════════════
+   Com o app aberto na tela de um setor: quando uma OS passa a ser tarefa
+   desse setor (entrou numa etapa dele vinda do outro, ou nasceu já nele),
+   toca um aviso sonoro, vibra (Android) e mostra uma faixa no topo até
+   alguém tocar nela. A OS fica marcada "Nova" até ser aberta. */
+var NOVAS={},AUDIO=null,WL=null;
+var MSG_ALERTA={em_transito:'Retirada externa a caminho — receber do técnico',recebido:'Aparelho chegou — fazer orçamento',
+  aguardando_preco:'Orçamento técnico pronto — enviar ao cliente',aprovado:'Cliente aprovou — iniciar serviço',
+  pronto:'Serviço pronto — entregar ao cliente',devolver:'Reprovado — devolver ao cliente'};
+function destravarSom(){
+  try{if(!AUDIO)AUDIO=new(window.AudioContext||window.webkitAudioContext)();if(AUDIO.state==='suspended')AUDIO.resume();}catch(e){}
+}
+/* O navegador só libera som depois de um toque na tela. */
+document.addEventListener('click',destravarSom,true);document.addEventListener('touchend',destravarSom,true);
+function tocarAlerta(){
+  try{
+    if(AUDIO){var t=AUDIO.currentTime;
+      [0,0.22,0.7,0.92].forEach(function(d,i){var o=AUDIO.createOscillator(),g=AUDIO.createGain();
+        o.type='sine';o.frequency.value=i%2?1175:880;
+        g.gain.setValueAtTime(0.0001,t+d);g.gain.exponentialRampToValueAtTime(0.5,t+d+0.02);g.gain.exponentialRampToValueAtTime(0.0001,t+d+0.19);
+        o.connect(g);g.connect(AUDIO.destination);o.start(t+d);o.stop(t+d+0.2);});}
+  }catch(e){}
+  try{if(navigator.vibrate)navigator.vibrate([300,150,300]);}catch(e){}
+}
+function verAlertas(antes){
+  if(!S.setor||ehExterno())return;
+  var novas=S.os.filter(function(o){
+    if(DONO[o.etapa]!==S.setor)return false;
+    var prev=antes[o.id];
+    return prev===undefined||DONO[prev]!==S.setor;
+  });
+  if(!novas.length)return;
+  novas.forEach(function(o){NOVAS[o.id]=1;mostrarAlerta(o);});
+  tocarAlerta();tituloAlertas();
+}
+function mostrarAlerta(o){
+  var box=$('alertas');if(!box)return;
+  var velho=$('al-'+o.id);if(velho)velho.remove();
+  var el=document.createElement('div');el.className='alerta';el.id='al-'+o.id;
+  el.innerHTML='<div style="font-size:24px">🔔</div><div><b>'+esc(MSG_ALERTA[o.etapa]||rotuloEtapa(o.etapa))+'</b>'
+    +'<div class="sub">'+esc(osLabel(o))+' · '+esc(o.cliente&&o.cliente.nome||'-')+' · '+esc(aparelho(o))+(o.cor?' '+esc(o.cor):'')+'</div></div>'
+    +'<button class="x" title="Fechar">✕</button>';
+  el.onclick=function(e){
+    if(e.target.classList.contains('x')){el.remove();return;}
+    el.remove();abrirOS(o.id);
+  };
+  box.appendChild(el);
+}
+function lerNova(id){
+  if(NOVAS[id]){delete NOVAS[id];tituloAlertas();}
+  var el=$('al-'+id);if(el)el.remove();
+}
+function limparAlertas(){NOVAS={};var b=$('alertas');if(b)b.innerHTML='';tituloAlertas();}
+function tituloAlertas(){var n=Object.keys(NOVAS).length;document.title=(n?'('+n+') ':'')+'Aquapuri - Módulo Manutenção';}
+/* Tela acesa: com a tela apagada o celular pausa o app e o alerta não toca. */
+function telaAcesa(on){
+  gravarLocal('telaAcesa',on?'1':'');
+  if(on){try{navigator.wakeLock&&navigator.wakeLock.request('screen').then(function(l){WL=l;}).catch(function(){});}catch(e){}}
+  else if(WL){try{WL.release();}catch(e){}WL=null;}
+}
+document.addEventListener('visibilitychange',function(){if(document.visibilityState==='visible'&&lerLocal('telaAcesa')&&S.setor)telaAcesa(true);});
+
 /* ═══ Navegação ══════════════════════════════════════════════════════════ */
 var TABS=[{k:'lista',l:'Ordens de serviço',l2:'Minhas retiradas'},{k:'painel',l:'Medição',so:'comercial manutencao'},{k:'tecnicos',l:'Técnicos',so:'manutencao'}];
 function go(v){S.view=v;window.scrollTo(0,0);render();}
@@ -553,8 +624,8 @@ function renderTabs(){
   $('tabs').innerHTML=TABS.filter(function(t){return!t.so||t.so.split(' ').indexOf(S.setor)>=0;}).map(function(t){return'<button class="tab'+(S.view===t.k?' on':'')+'" onclick="go(\''+t.k+'\')">'+(ehExterno()&&t.l2||t.l)+'</button>';}).join('');
 }
 /* Ao abrir o app, sempre a tela de escolha do setor. */
-function escolherSetor(s){S.setor=s;S.view='lista';S.filtro='abertas';S.busca='';window.scrollTo(0,0);render();}
-function trocarSetor(){S.setor='';fecharModal();window.scrollTo(0,0);render();}
+function escolherSetor(s){S.setor=s;S.view='lista';S.filtro='abertas';S.busca='';limparAlertas();destravarSom();if(lerLocal('telaAcesa'))telaAcesa(true);window.scrollTo(0,0);render();}
+function trocarSetor(){S.setor='';limparAlertas();fecharModal();window.scrollTo(0,0);render();}
 function vInicio(){
   function n(s){return S.os.filter(function(o){return DONO[o.etapa]===s;}).length;}
   function tx(k){return k?k+' OS aguardando o setor':'nada pendente';}
@@ -679,6 +750,7 @@ function vLista(){
     /* Botão "Importar do Bling" fora da tela a pedido da loja (começaram do
        zero). A função importarBling() continua no código para uso futuro. */
     +'</div>';
+  h+='<label class="sub" style="display:flex;gap:8px;align-items:center;margin:-6px 0 10px;"><input type="checkbox" style="width:18px;height:18px;"'+(lerLocal('telaAcesa')?' checked':'')+' onchange="telaAcesa(this.checked)"/> 🔔 Alertas ligados · manter a tela acesa (com a tela apagada o aviso não toca)</label>';
   h+='<input class="search" id="busca" placeholder="Buscar por nº da OS, cliente, telefone, modelo…" value="'+esc(S.busca)+'" oninput="S.busca=this.value;S._focoBusca=true;render()"/>';
   h+='<div class="chips">'+FILTROS.map(function(x){
     var n=S.os.filter(x.f).length;
@@ -732,6 +804,7 @@ function cardOS(o,agrupado){
     h+='<div class="card os'+(prazoVencido(o)?' os-late':'')+'" onclick="abrirOS(\''+o.id+'\')">'
       +'<div class="os-num">'+esc(o.numero||'s/ nº')+'</div>'
       +'<div class="os-main"><div class="t-row"><div class="t">'+esc(o.cliente&&o.cliente.nome||'-')+'</div>'
+      +(NOVAS[o.id]?'<span class="badge nova">🔔 Nova</span>':'')
       +(o.atendente?'<span class="vend" title="Vendedor responsável">👤 '+esc(nomeCurto(o.atendente))+'</span>':'')+'</div>'
       +'<div class="s os-ap">'+esc(aparelho(o))+(o.cor?' · <b>'+esc(o.cor)+'</b>':'')+(o.voltagem?' · '+esc(o.voltagem):'')+'</div>'
       +(o.garantia==='Sim'?'<div><span class="badge b-red">🔁 Garantia / retorno</span></div>':'')
@@ -1160,7 +1233,7 @@ async function salvarNovaOS(){
 function getOS(id){return S.os.filter(function(o){return o.id===id;})[0];}
 async function abrirOS(id){
   var o=getOS(id);if(!o)return;
-  S.abertaId=id;S.modo='detalhe';S.midias=null;
+  S.abertaId=id;S.modo='detalhe';S.midias=null;lerNova(id);
   modal(esc(osLabel(o))+' · '+esc(o.cliente&&o.cliente.nome||''),detalheHtml(o,null));
   try{var m=await carregarMidias(id);if(S.abertaId===id){S.midias=m;$('mdl-b').innerHTML=detalheHtml(getOS(id)||o,m);}}
   catch(e){var g=$('det-mid');if(g)g.innerHTML='<div class="err">Erro ao carregar fotos: '+esc(e.message)+'</div>';}
