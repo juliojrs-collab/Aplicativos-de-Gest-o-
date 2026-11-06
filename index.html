@@ -1255,7 +1255,34 @@ function renderNumero(){
     ?'<div class="field"><label>Nº da OS (digitado) <span class="req">*</span></label><input id="nv-numero" placeholder="Número da OS aberta no Bling"/></div>'
       +'<button class="btn btn-g btn-sm" onclick="NV.manual=false;renderNumero()">Voltar a gerar pelo Bling</button>'
     :'<div class="info">O número será gerado automaticamente no Bling ao registrar a entrada.</div>'
-      +'<button class="btn btn-g btn-sm" onclick="NV.manual=true;renderNumero()">Digitar número manualmente</button>';
+      /* Só depois de o Bling falhar: o técnico tocava sem querer e a OS
+         ficava com um número inventado, fora do Bling. */
+      +(NV.erroBling?'<button class="btn btn-g btn-sm" onclick="if(confirm(\'Só use se a OS já foi aberta direto no Bling. Digitar o número?\')){NV.manual=true;renderNumero();}">Digitar número manualmente</button>':'');
+}
+/* Corpo do pedido que abre a OS no Bling (recebimento e "Abrir no Bling"). */
+function corpoOSBling(os,cli,chave){
+  return{chave:chave,vendedorId:os.vendedorId||null,
+    contato:cli.blingId?{id:cli.blingId}:{nome:cli.nome,telefone:cli.telefone,documento:cli.documento},
+    equipamento:[aparelho(os),os.cor].filter(Boolean).join(' '),numeroSerie:os.nSerie||'',descricaoProblema:os.problema||'',dataPrevista:(os.prazos&&os.prazos.orcamento)||'',
+    observacoes:[os.garantia==='Sim'?'GARANTIA / RETORNO':'',externa(os)?'Retirado na casa do cliente pelo técnico '+os.tecnicoExterno+'.':'',os.voltagem?'Voltagem: '+os.voltagem:'',os.questionario,os.acessorios?'Acessórios: '+os.acessorios:'',os.condicao?'Condição: '+os.condicao:''].filter(Boolean).join('\n\n')};
+}
+/* OS registrada com número digitado (sem ligação com o Bling): abre agora no
+   Bling e passa a usar o número de lá. O número digitado fica guardado. */
+async function abrirNoBling(id){
+  var o=getOS(id);if(!o||o.blingId)return;
+  if(!confirm('Abrir esta OS no Bling agora? O app passa a usar o número gerado pelo Bling'+(o.numero?' (o número digitado, '+o.numero+', fica guardado na OS)':'')+'.'))return;
+  var vend=acharVendedor(o.atendente||'');
+  var os=Object.assign({},o,{vendedorId:o.vendedorId||(vend&&vend.id)||null});
+  toast('Abrindo OS no Bling…');
+  try{
+    var r=await fetch(API+'/api/bling/os',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(corpoOSBling(os,o.cliente||{},'app-'+id))});
+    var j=await r.json().catch(function(){return{};});
+    if(!r.ok||!j.id)throw new Error(j.error||('HTTP '+r.status));
+    var upd={numero:j.numero||'',blingId:j.id,numeroDigitado:o.numero||''};
+    if(j.contatoId)upd['cliente.blingId']=j.contatoId;
+    await avancar(id,upd,'OS aberta no Bling — nº '+(j.numero||''));
+    var n=getOS(id)||Object.assign({},o,upd);datasBling(id,datasDaOS(n));
+  }catch(e){alert('O Bling não abriu a OS: '+e.message);}
 }
 function nvErro(m){var e=$('nv-err');if(e)e.innerHTML=m?'<div class="err" style="margin-top:12px;">'+m+'</div>':'';}
 async function salvarNovaOS(){
@@ -1305,12 +1332,7 @@ async function salvarNovaOS(){
     if(NV.manual){os.numero=val('nv-numero');os.blingId=null;}
     else{
       btn.textContent='Abrindo OS no Bling…';
-      var r=await fetch(API+'/api/bling/os',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
-        chave:NV.chave,vendedorId:os.vendedorId||null,
-        contato:cli.blingId?{id:cli.blingId}:{nome:cli.nome,telefone:cli.telefone,documento:cli.documento},
-        equipamento:[aparelho(os),os.cor].filter(Boolean).join(' '),numeroSerie:os.nSerie,descricaoProblema:os.problema,dataPrevista:os.prazos.orcamento||'',
-        observacoes:[os.garantia==='Sim'?'GARANTIA / RETORNO':'',NV.externa?'Retirado na casa do cliente pelo técnico '+os.tecnicoExterno+'.':'','Voltagem: '+os.voltagem,os.questionario,os.acessorios?'Acessórios: '+os.acessorios:'',os.condicao?'Condição: '+os.condicao:''].filter(Boolean).join('\n\n')
-      })});
+      var r=await fetch(API+'/api/bling/os',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(corpoOSBling(os,cli,NV.chave))});
       var j=await r.json().catch(function(){return{};});
       if(!r.ok||!j.id)throw{bling:true,message:j.error||('HTTP '+r.status)};
       os.numero=j.numero||'';os.blingId=j.id;
@@ -1332,7 +1354,7 @@ async function salvarNovaOS(){
     abrirOS(ref.id);
   }catch(e){
     btn.disabled=false;btn.textContent=NV.externa?'Registrar retirada':'Registrar entrada';
-    if(e&&e.bling)nvErro('O Bling não abriu a OS: '+esc(e.message)+'<br>Tente de novo, ou toque em "Digitar número manualmente" e abra a OS direto no Bling.');
+    if(e&&e.bling){NV.erroBling=true;renderNumero();nvErro('O Bling não abriu a OS: '+esc(e.message)+'<br>Tente de novo. Se continuar falhando, abra a OS direto no Bling e toque em "Digitar número manualmente".');}
     else nvErro('Erro ao salvar: '+esc(e&&e.message||e));
   }
 }
@@ -1399,7 +1421,8 @@ function detalheHtml(o,midias){
   /* Dados */
   var c=o.cliente||{};
   h+='<div class="card"><h3>Recepção</h3><dl class="kv">'
-    +'<dt>Nº OS</dt><dd>'+esc(o.numero||'-')+(o.blingId?' <span class="badge b-green">Bling</span>':'')+(o.importado?' <span class="badge b-gray">importada ('+esc(o.importado.situacaoBling||'')+')</span>':'')+'</dd>'
+    +'<dt>Nº OS</dt><dd>'+esc(o.numero||'-')+(o.blingId?' <span class="badge b-green">Bling</span>':(o.importado?'':' <span class="badge b-red">não está no Bling</span>'+(ehComercial()?' <button class="btn btn-p btn-sm" onclick="abrirNoBling(\''+o.id+'\')">Abrir esta OS no Bling</button>':'')))
+      +(o.numeroDigitado?' <span class="sub">(digitado antes: '+esc(o.numeroDigitado)+')</span>':'')+(o.importado?' <span class="badge b-gray">importada ('+esc(o.importado.situacaoBling||'')+')</span>':'')+'</dd>'
     +(externa(o)?'<dt>Origem</dt><dd>🚚 Retirado na casa do cliente · '+esc(o.tecnicoExterno||'-')+'</dd>':'')
     +'<dt>Vendedor</dt><dd>'+esc(o.atendente||'-')+'</dd>'
     +'<dt>Cliente</dt><dd>'+esc(c.nome||'-')+'</dd>'
