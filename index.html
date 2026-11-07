@@ -1295,7 +1295,8 @@ function corpoOSBling(os,cli,chave){
     equipamento:[aparelho(os),os.cor].filter(Boolean).join(' '),numeroSerie:os.nSerie||'',descricaoProblema:os.problema||'',dataPrevista:(os.prazos&&os.prazos.orcamento)||'',
     observacoes:[os.garantia==='Sim'?'GARANTIA / RETORNO':'',externa(os)?'Retirado na casa do cliente pelo técnico '+os.tecnicoExterno+'.':'',os.voltagem?'Voltagem: '+os.voltagem:'',
       os.pressaoLocal?'Pressão da água no local: '+pressaoTxt(os.pressaoLocal):'',
-      os.estacionamento&&os.estacionamento.pagou?'ESTACIONAMENTO PAGO NA RETIRADA: '+money(os.estacionamento.valor)+' — acrescentar no orçamento':'',os.questionario,os.acessorios?'Acessórios: '+os.acessorios:'',os.condicao?'Condição: '+os.condicao:''].filter(Boolean).join('\n\n')};
+      /* Estacionamento é informação interna: fica só no app (não vai ao Bling nem ao relatório do cliente). */
+      os.questionario,os.acessorios?'Acessórios: '+os.acessorios:'',os.condicao?'Condição: '+os.condicao:''].filter(Boolean).join('\n\n')};
 }
 /* OS registrada com número digitado (sem ligação com o Bling): abre agora no
    Bling e passa a usar o número de lá. O número digitado fica guardado. */
@@ -2247,7 +2248,6 @@ function montarPdfEntrada(o,fotos){
   line('Purificador',aparelho(o));line('Cor',o.cor);line('Voltagem',o.voltagem);line('N° de série',o.nSerie);
   if(o.garantia)line('Garantia / retorno',o.garantia);
   if(o.pressaoLocal)line('Pressão no local',pressaoTxt(o.pressaoLocal));
-  if(o.estacionamento&&o.estacionamento.pagou)line('Estacionamento',money(o.estacionamento.valor)+' (acrescentado ao orçamento)');
   if(o.prazos&&o.prazos.orcamento)line('Previsão do orçamento',fmtData(o.prazos.orcamento));
   line('Condição de limpeza',o.condicao);line('Acessórios entregues',o.acessorios||'Nenhum');
   section('Problema relatado pelo cliente');
