@@ -818,25 +818,34 @@ var FILTROS=[
   {k:'paradas',l:'Paradas',f:function(o){return o.etapa!=='entregue'&&atrasada(o);}}
 ].concat(ETAPAS.map(function(e){return{k:e.k,et:e.k,f:function(o){return o.etapa===e.k;}};}))
  .concat([{k:'todas',l:'Todas',f:function(){return true;}}]);
+function soAlnum(t){return normBusca(t).replace(/[^a-z0-9]/g,'');}
+function serieBate(o,q){var a=soAlnum(q);return!!(a.length>=3&&o.nSerie&&soAlnum(o.nSerie).indexOf(a)>=0);}
+function casaBusca(o,q){
+  if(!q)return true;
+  if(serieBate(o,q))return true;
+  var t=normBusca([o.numero,o.numeroDigitado,o.cliente&&o.cliente.nome,o.cliente&&o.cliente.telefone,o.marca,o.modelo,o.cor,o.nSerie,o.atendente,o.tecnicoExterno].join(' '));
+  return normBusca(q).split(/\s+/).filter(Boolean).every(function(p){return t.indexOf(p)>=0;});
+}
 function vLista(){
   var fil=FILTROS.filter(function(x){return x.k===S.filtro;})[0]||FILTROS[0];
-  var q=S.busca.toLowerCase();
-  var list=S.os.filter(fil.f).filter(function(o){
-    if(!q)return true;
-    return [o.numero,o.cliente&&o.cliente.nome,o.cliente&&o.cliente.telefone,o.marca,o.modelo,o.cor,o.nSerie].join(' ').toLowerCase().indexOf(q)>=0;
-  });
+  var q=S.busca.trim().toLowerCase();
+  /* Com texto na busca, procura em todas as OS (também entregues), não só no
+     filtro escolhido. Nº de série: acha por qualquer parte, ignorando
+     espaços, traços e pontos. */
+  var list=(q?S.os:S.os.filter(fil.f)).filter(function(o){return casaBusca(o,q);});
   var minhas=S.os.filter(function(o){return DONO[o.etapa]===S.setor;}).length;
   var h='<div class="ph"><div><h2>Ordens de serviço · '+SETORES[S.setor]+'</h2><p class="sub"><b>'+minhas+' com você</b> · '+S.os.filter(FILTROS[0].f).length+' abertas · '+S.os.length+' no total</p></div>'
     /* Botão "Importar do Bling" fora da tela a pedido da loja (começaram do
        zero). A função importarBling() continua no código para uso futuro. */
     +'</div>';
   h+='<label class="sub" style="display:flex;gap:8px;align-items:center;margin:-6px 0 10px;"><input type="checkbox" style="width:18px;height:18px;"'+(lerLocal('telaAcesa')?' checked':'')+' onchange="telaAcesa(this.checked)"/> 🔔 Alertas ligados · manter a tela acesa (com a tela apagada o aviso não toca)</label>';
-  h+='<input class="search" id="busca" placeholder="Buscar por nº da OS, cliente, telefone, modelo…" value="'+esc(S.busca)+'" oninput="S.busca=this.value;S._focoBusca=true;render()"/>';
+  h+='<input class="search" id="busca" placeholder="Buscar por nº da OS, cliente, telefone, modelo, nº de série…" value="'+esc(S.busca)+'" oninput="S.busca=this.value;S._focoBusca=true;render()"/>';
   h+='<div class="chips">'+FILTROS.map(function(x){
     var n=S.os.filter(x.f).length;
     return'<button class="chip'+(S.filtro===x.k?' on':'')+'" onclick="S.filtro=\''+x.k+'\';render()">'+esc(x.et?rotuloEtapa(x.et):x.l)+'<b>'+n+'</b></button>';
   }).join('')+'</div>';
-  if(!list.length)h+='<div class="empty">Nenhuma OS aqui.</div>';
+  if(q)h+='<div class="sub" style="margin:-4px 0 10px;">'+list.length+' resultado'+(list.length===1?'':'s')+' em todas as OS (inclui as entregues)</div>';
+  if(!list.length)h+='<div class="empty">'+(q?'Nenhuma OS encontrada.':'Nenhuma OS aqui.')+'</div>';
   /* Mais urgente primeiro: prazo mais próximo (atrasadas no topo); sem prazo
      vai para o fim, na ordem de chegada. */
   list.sort(function(a,b){return chavePrazo(a)-chavePrazo(b)||(a.criadoEm||0)-(b.criadoEm||0);});
@@ -887,6 +896,7 @@ function cardOS(o,agrupado){
       +(NOVAS[o.id]?'<span class="badge nova">🔔 Nova</span>':'')
       +(o.atendente?'<span class="vend" title="Vendedor responsável">👤 '+esc(nomeCurto(o.atendente))+'</span>':'')+'</div>'
       +'<div class="s os-ap">'+esc(aparelho(o))+(o.cor?' · <b>'+esc(o.cor)+'</b>':'')+(o.voltagem?' · '+esc(o.voltagem):'')+'</div>'
+      +(S.busca&&serieBate(o,S.busca)?'<div class="s">Nº de série: <b>'+esc(o.nSerie)+'</b></div>':'')
       +(o.garantia==='Sim'?'<div><span class="badge b-red">🔁 Garantia / retorno</span></div>':'')
       +(o.tecnico?'<div class="s">'+esc(o.tecnico)+'</div>':'')
       +(externa(o)?'<div class="tag-ext">🚚 Retirada na casa do cliente'+(o.tecnicoExterno&&!ehExterno()?' · '+esc(o.tecnicoExterno):'')+'</div>':'')+'</div>'
