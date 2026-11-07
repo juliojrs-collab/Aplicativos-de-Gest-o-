@@ -269,12 +269,38 @@ function questHtml(px,resp){
   }).join('');
 }
 /* Garantia/retorno e voltagem: escolha única, obrigatória na entrada. */
-var GARANTIA=['Sim','Não'],VOLTAGENS=['127V','220V'];
+var GARANTIA=['Sim','Não'],VOLTAGENS=['127V','220V','Bivolt'],SIMNAO=['Sim','Não'];
 function escolhaHtml(id,rot,ops,atual){
   return'<div class="field"><label>'+esc(rot)+' <span class="req">*</span></label><div class="opts" id="'+id+'">'
     +ops.map(function(op){return'<button type="button" class="chip'+(op===atual?' on':'')+'" data-v="'+esc(op)+'" onclick="escolher(this)">'+esc(op)+'</button>';}).join('')+'</div></div>';
 }
-function escolher(btn){Array.prototype.forEach.call(btn.parentNode.children,function(b){b.classList.toggle('on',b===btn);});}
+function escolher(btn){
+  Array.prototype.forEach.call(btn.parentNode.children,function(b){b.classList.toggle('on',b===btn);});
+  var w=$(btn.parentNode.id+'-w');if(w)w.style.display=btn.getAttribute('data-v')==='Sim'?'':'none';
+}
+/* Pressão medida no local da retirada (kgf) e estacionamento pago pelo técnico. */
+function pressaoTxt(p){return!p?'':p.naoMedida?'não foi possível medir':(String(p.kgf).replace('.',',')+' kgf');}
+function estacTxt(e){return!e?'':e.pagou?money(e.valor)+' (acrescentar no orçamento)':'não';}
+function localHtml(px,o){
+  var p=o&&o.pressaoLocal||{},e=o&&o.estacionamento||null;
+  return'<div class="field"><label>Pressão da água no local (kgf) <span class="req">*</span></label>'
+    +'<input id="'+px+'-pressao" inputmode="decimal" placeholder="Ex: 3,5" value="'+esc(p.kgf!=null?String(p.kgf).replace('.',','):'')+'"/>'
+    +'<label class="radio-l" style="margin-top:6px;font-size:14px;"><input type="checkbox" id="'+px+'-pressao-nm"'+(p.naoMedida?' checked':'')+'/> Não foi possível medir</label></div>'
+    +escolhaHtml(px+'-estac','Precisou pagar estacionamento?',SIMNAO,e?(e.pagou?'Sim':'Não'):'')
+    +'<div class="field" id="'+px+'-estac-w" style="margin-top:-4px;'+(e&&e.pagou?'':'display:none')+'"><label>Valor pago no estacionamento (R$) <span class="req">*</span></label>'
+    +'<input id="'+px+'-estac-valor" inputmode="decimal" placeholder="Ex: 15,00" value="'+esc(e&&e.pagou?String(e.valor).replace('.',','):'')+'"/>'
+    +'<div class="hint">Esse valor é acrescentado no preço do serviço.</div></div>';
+}
+/* Lê os dois campos; devolve {pressaoLocal, estacionamento, falta[]}. */
+function localLer(px){
+  var r={falta:[]},nm=$(px+'-pressao-nm')&&$(px+'-pressao-nm').checked,kg=num(val(px+'-pressao'));
+  if(nm)r.pressaoLocal={naoMedida:true};else if(val(px+'-pressao')&&kg>0)r.pressaoLocal={kgf:kg};else r.falta.push('pressão da água no local (ou "não foi possível medir")');
+  var es=escolhaVal(px+'-estac');
+  if(!es)r.falta.push('se pagou estacionamento');
+  else if(es==='Não')r.estacionamento={pagou:false};
+  else{var v=num(val(px+'-estac-valor'));if(v>0)r.estacionamento={pagou:true,valor:Math.round(v*100)/100};else r.falta.push('valor do estacionamento');}
+  return r;
+}
 function escolhaVal(id){var b=$(id)&&$(id).querySelector('.on');return b?b.getAttribute('data-v'):'';}
 function garantiaTxt(o){return o.garantia==='Sim'?'Garantia/retorno':'';}
 function qSel(px,i,btn){
@@ -1147,6 +1173,7 @@ function novaOS(externa,rasc){
     +'<div class="sec">'+(externa?'Como o aparelho estava':'Como o aparelho chegou')+'</div>'
     +midiaFormHtml('Fotos de entrada (até 6)',false,true)
     +'<div class="sec">Assinatura do cliente</div>'
+    +(externa?'<div class="sec">No local da retirada</div>'+localHtml('nv',null):'')
     +(externa
       ?'<div class="info"><b>Retirada com avaliação técnica: '+money(VALOR_RETIRADA)+'</b>, descontada do serviço se o orçamento for aprovado. Em alguns casos não é cobrada.</div>'
         +'<div class="field"><label>Pagamento da retirada <span class="req">*</span></label>'
@@ -1184,10 +1211,12 @@ function renderCliente(){
   el.innerHTML='<div class="field"><label>Buscar cliente cadastrado</label><input id="nv-busca" placeholder="Nome, CPF ou celular" oninput="buscarCliente(this.value)" autocomplete="off"/>'
     +(CLIENTES.length?'':'<div class="hint">Carregando a lista de clientes… enquanto isso a busca vai direto no Bling.</div>')+'</div>'
     +'<div id="nv-sug"></div>'
-    +'<div class="hint" style="margin:-6px 0 10px;">Não achou? Preencha abaixo que o cliente é cadastrado no Bling junto com a OS.</div>'
+    /* Na retirada o técnico só escolhe cliente já cadastrado no Bling. */
+    +(NV.externa?'<div class="info">Cliente sem cadastro? Ligue para a loja cadastrar no Bling e busque de novo aqui.</div>'
+    :'<div class="hint" style="margin:-6px 0 10px;">Não achou? Preencha abaixo que o cliente é cadastrado no Bling junto com a OS.</div>'
     +'<div class="field"><label>Nome do cliente <span class="req">*</span></label><input id="nv-nome"/></div>'
     +'<div class="g2"><div class="field"><label>Celular <span class="req">*</span></label><input id="nv-tel" inputmode="tel" placeholder="(00) 00000-0000"/></div>'
-    +'<div class="field"><label>CPF/CNPJ</label><input id="nv-doc" inputmode="numeric"/></div></div>';
+    +'<div class="field"><label>CPF/CNPJ</label><input id="nv-doc" inputmode="numeric"/></div></div>');
 }
 /* Busca de cliente: a lista de todos os clientes do Bling fica guardada no
    aparelho (renovada a cada hora) e a busca é feita aqui mesmo, na hora.
@@ -1264,7 +1293,9 @@ function corpoOSBling(os,cli,chave){
   return{chave:chave,vendedorId:os.vendedorId||null,
     contato:cli.blingId?{id:cli.blingId}:{nome:cli.nome,telefone:cli.telefone,documento:cli.documento},
     equipamento:[aparelho(os),os.cor].filter(Boolean).join(' '),numeroSerie:os.nSerie||'',descricaoProblema:os.problema||'',dataPrevista:(os.prazos&&os.prazos.orcamento)||'',
-    observacoes:[os.garantia==='Sim'?'GARANTIA / RETORNO':'',externa(os)?'Retirado na casa do cliente pelo técnico '+os.tecnicoExterno+'.':'',os.voltagem?'Voltagem: '+os.voltagem:'',os.questionario,os.acessorios?'Acessórios: '+os.acessorios:'',os.condicao?'Condição: '+os.condicao:''].filter(Boolean).join('\n\n')};
+    observacoes:[os.garantia==='Sim'?'GARANTIA / RETORNO':'',externa(os)?'Retirado na casa do cliente pelo técnico '+os.tecnicoExterno+'.':'',os.voltagem?'Voltagem: '+os.voltagem:'',
+      os.pressaoLocal?'Pressão da água no local: '+pressaoTxt(os.pressaoLocal):'',
+      os.estacionamento&&os.estacionamento.pagou?'ESTACIONAMENTO PAGO NA RETIRADA: '+money(os.estacionamento.valor)+' — acrescentar no orçamento':'',os.questionario,os.acessorios?'Acessórios: '+os.acessorios:'',os.condicao?'Condição: '+os.condicao:''].filter(Boolean).join('\n\n')};
 }
 /* OS registrada com número digitado (sem ligação com o Bling): abre agora no
    Bling e passa a usar o número de lá. O número digitado fica guardado. */
@@ -1296,8 +1327,10 @@ async function salvarNovaOS(){
   var ret=document.querySelector('input[name="nv-ret"]:checked');
   if(NV.externa){os.origem='externa';os.tecnicoExterno=val('nv-tecext');}
   var falta=[];
-  if(!cli.nome)falta.push('nome do cliente');
-  if(!NV.contato&&!cli.telefone)falta.push('celular');
+  if(NV.externa){var lc=localLer('nv');falta=falta.concat(lc.falta);if(lc.pressaoLocal)os.pressaoLocal=lc.pressaoLocal;if(lc.estacionamento)os.estacionamento=lc.estacionamento;}
+  if(NV.externa&&!NV.contato)falta.push('cliente (busque e escolha um cliente cadastrado)');
+  else if(!cli.nome)falta.push('nome do cliente');
+  if(!NV.externa&&!NV.contato&&!cli.telefone)falta.push('celular');
   if(!os.marca)falta.push('marca');
   if(!os.modelo)falta.push('modelo');
   if(!os.garantia)falta.push('se é garantia/retorno');
@@ -1429,6 +1462,8 @@ function detalheHtml(o,midias){
     +'<dt>Telefone</dt><dd>'+esc(c.telefone||'-')+'</dd>'
     +(c.documento?'<dt>CPF/CNPJ</dt><dd>'+esc(c.documento)+'</dd>':'')
     +'<dt>Aparelho</dt><dd>'+esc(aparelho(o))+(o.cor?' · '+esc(o.cor):'')+(o.voltagem?' · '+esc(o.voltagem):'')+(o.nSerie?' · série '+esc(o.nSerie):'')+'</dd>'
+    +(o.pressaoLocal?'<dt>Pressão no local</dt><dd>'+esc(pressaoTxt(o.pressaoLocal))+'</dd>':'')
+    +(o.estacionamento?'<dt>Estacionamento</dt><dd>'+(o.estacionamento.pagou?'<span class="badge b-orange">🅿️ '+money(o.estacionamento.valor)+' — acrescentar no orçamento</span>':'não')+'</dd>':'')
     +(o.garantia?'<dt>Garantia/retorno</dt><dd>'+(o.garantia==='Sim'?'<span class="badge b-red">Sim — garantia/retorno</span>':'Não')+'</dd>':'')
     +(o.condicao?'<dt>Condição</dt><dd>'+esc(o.condicao)+'</dd>':'')
     +(o.acessorios?'<dt>Acessórios</dt><dd>'+esc(o.acessorios)+'</dd>':'')
@@ -1494,6 +1529,7 @@ function acoesHtml(o){
     case'recebido':b='<button class="btn btn-p btn-lg" onclick="iniciarOrc(\''+id+'\')">🔧 Iniciar orçamento</button>';break;
     case'em_orcamento':b='<button class="btn btn-p btn-lg" onclick="finalizarOrc(\''+id+'\')">📋 Finalizar orçamento</button>';break;
     case'aguardando_preco':b='<div class="info">A manutenção terminou o orçamento técnico. Monte o preço no Bling e envie ao cliente.'
+      +(o.estacionamento&&o.estacionamento.pagou?'<br>🅿️ <b>Acrescente o estacionamento de '+money(o.estacionamento.valor)+'</b> pago na retirada.':'')
       +(o.blingId?'<br><b>Ao mudar a OS para "Orçada" no Bling, o app passa sozinho para "Aguardando aprovação"</b> (em até 3 minutos).':'')+'</div>'
       +'<button class="btn '+(o.blingId?'btn-g':'btn-p btn-lg')+'" onclick="orcamentoEnviado(\''+id+'\')">📤 '+(o.blingId?'Registrar envio manualmente':'Orçamento enviado ao cliente')+'</button>';break;
     case'aguardando_aprovacao':b='<div class="info">'+(o.importado&&o.importado.situacaoBling&&o.tempos.informado&&o.tempos.informado===o.importado.em?'Orçamento passado ao cliente antes do app (importada do Bling). Aguardando a resposta.':o.tempos.informado?'Cliente informado em '+fmtDH(o.tempos.informado)+'. Aguardando a resposta.':'Passe o orçamento ao cliente e registre.')+'<br>'+contaCliente(o)
@@ -1927,12 +1963,22 @@ async function equipParaBling(id,dados){
   }
 }
 function reenviarEquip(id){var o=getOS(id);equipParaBling(id,{equipamento:equipBling(o),numeroSerie:o.nSerie||''});}
+async function vendedorParaBling(id,vid){
+  var o=getOS(id);if(!o||!o.blingId)return;
+  try{
+    var r=await fetch(API+'/api/bling/os/'+o.blingId+'/vendedor',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({vendedorId:vid})});
+    var j=await r.json().catch(function(){return{};});
+    if(!r.ok)throw new Error(j.error||('HTTP '+r.status));
+    toast('Vendedor alterado também no Bling');
+  }catch(e){alert('O vendedor mudou no app, mas não no Bling: '+e.message+'\nTroque também direto na OS do Bling.');}
+}
 function editarRecepcao(id){
   var o=getOS(id),c=o.cliente||{};
   var cond=CONDICOES.map(function(x){return'<option'+(o.condicao===x?' selected':'')+'>'+esc(x)+'</option>';}).join('');
   passoSimples('Editar recepção',
-    '<div class="info">Isto altera só este app. O cadastro e a OS no Bling não mudam.</div>'
+    '<div class="info">Aparelho, nº de série e vendedor também são atualizados na OS do Bling. O cadastro do cliente no Bling não muda.</div>'
     +'<div class="field"><label>Nº da OS</label><input id="ed-num" value="'+esc(o.numero||'')+'"/></div>'
+    +(ehComercial()?'<div class="field"><label>Vendedor responsável</label><input id="ed-vend" list="vendedores" autocomplete="off" value="'+esc(o.atendente||'')+'"/></div>':'')
     +(externa(o)?'<div class="field"><label>Técnico que retirou</label><input id="ed-tecext" list="tecnicos-ext" value="'+esc(o.tecnicoExterno||'')+'"/></div>':'')
     +'<div class="g2"><div class="field"><label>Cliente</label><input id="ed-nome" value="'+esc(c.nome||'')+'"/></div>'
     +'<div class="field"><label>Telefone</label><input id="ed-tel" value="'+esc(c.telefone||'')+'"/></div></div>'
@@ -1944,17 +1990,27 @@ function editarRecepcao(id){
     +'<div class="field"><label>Condição</label><select id="ed-cond"><option value="">-</option>'+cond+'</select></div></div>'
     +'<div class="field"><label>Acessórios</label><input id="ed-acess" value="'+esc(o.acessorios||'')+'"/></div>'
     +'<div class="field"><label>Problema relatado</label><textarea id="ed-prob" rows="3">'+esc(o.problema||'')+'</textarea></div>'
+    +(externa(o)?'<div class="sec">No local da retirada</div>'+localHtml('ed',o):'')
     +(o.respostas?'<div class="sec">Questionário</div>'+questHtml('ed',o.respostas)
       :'<div class="field"><label>Questionário</label><textarea id="ed-quest" rows="8" style="font-size:13px;">'+esc(o.questionario||'')+'</textarea></div>'),
     'Salvar',async function(){
       var qz=o.respostas?questLer('ed'):null;
       if(qz&&qz.falta.length){psErro('Responda a pergunta '+qz.falta.join(', ')+' do questionário.');return false;}
       var qupd=qz?{respostas:qz.respostas,questionario:questTexto(qz.respostas)}:{questionario:val('ed-quest')};
+      if(externa(o)){var lc=localLer('ed');if(lc.falta.length){psErro('Falta: '+lc.falta.join(', ')+'.');return false;}qupd.pressaoLocal=lc.pressaoLocal;qupd.estacionamento=lc.estacionamento;}
+      var novoVend=null;
+      if($('ed-vend')&&val('ed-vend')!==(o.atendente||'')){
+        if(!VENDEDORES.length)await carregarVendedores();
+        novoVend=acharVendedor(val('ed-vend'));
+        if(!novoVend){psErro('Escolha um vendedor da lista do Bling.');return false;}
+        qupd.atendente=novoVend.nome;qupd.vendedorId=novoVend.id;
+      }
       await avancar(id,Object.assign(qupd,{numero:val('ed-num'),'cliente.nome':val('ed-nome'),'cliente.telefone':val('ed-tel'),marca:val('ed-marca'),modelo:val('ed-modelo'),cor:val('ed-cor'),
         nSerie:val('ed-serie'),garantia:escolhaVal('ed-garantia'),voltagem:escolhaVal('ed-volt'),condicao:val('ed-cond'),acessorios:val('ed-acess'),problema:val('ed-prob')},externa(o)&&val('ed-tecext')?{tecnicoExterno:val('ed-tecext')}:{}),'Dados atualizados');
       /* Equipamento (marca, modelo e cor) e nº de série também na OS do Bling. */
       var eqAntes=equipBling(o),eqDepois=[[val('ed-marca'),val('ed-modelo')].join(' ').trim()||'Purificador',val('ed-cor')].filter(Boolean).join(' ');
       if(o.blingId&&(eqAntes!==eqDepois||(o.nSerie||'')!==val('ed-serie')))equipParaBling(id,{equipamento:eqDepois,numeroSerie:val('ed-serie')});
+      if(novoVend&&o.blingId)vendedorParaBling(id,novoVend.id);
     });
 }
 
@@ -2190,6 +2246,8 @@ function montarPdfEntrada(o,fotos){
   section('Aparelho');
   line('Purificador',aparelho(o));line('Cor',o.cor);line('Voltagem',o.voltagem);line('N° de série',o.nSerie);
   if(o.garantia)line('Garantia / retorno',o.garantia);
+  if(o.pressaoLocal)line('Pressão no local',pressaoTxt(o.pressaoLocal));
+  if(o.estacionamento&&o.estacionamento.pagou)line('Estacionamento',money(o.estacionamento.valor)+' (acrescentado ao orçamento)');
   if(o.prazos&&o.prazos.orcamento)line('Previsão do orçamento',fmtData(o.prazos.orcamento));
   line('Condição de limpeza',o.condicao);line('Acessórios entregues',o.acessorios||'Nenhum');
   section('Problema relatado pelo cliente');
