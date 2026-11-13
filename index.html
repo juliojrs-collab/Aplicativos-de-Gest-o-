@@ -1420,17 +1420,30 @@ async function abrirOS(id){
 var ITB={};
 var ETAPAS_ITENS=['aguardando_aprovacao','aprovado','em_servico','pronto','devolver','entregue'];
 function mostraItensBling(o){return!!(o&&o.blingId&&ETAPAS_ITENS.indexOf(o.etapa)>=0);}
-async function carregarItensBling(id){
+async function carregarItensBling(id,silencioso){
   var o=getOS(id);if(!o||!o.blingId)return;
-  ITB[id]=Object.assign({},ITB[id]||{},{carregando:true});pintarItensBling(id);
+  var antes=JSON.stringify(ITB[id]&&[ITB[id].itens,ITB[id].obs]);
+  if(!silencioso){ITB[id]=Object.assign({},ITB[id]||{},{carregando:true});pintarItensBling(id);}
   try{
     var r=await fetch(API+'/api/bling/os/'+o.blingId+'/itens');
     var j=await r.json().catch(function(){return{};});
     if(!r.ok)throw new Error(j.error||('HTTP '+r.status));
     ITB[id]={itens:j.itens||[],obs:j.observacoesServico||'',em:Date.now()};
-  }catch(e){ITB[id]={erro:e.message,itens:(ITB[id]||{}).itens};}
-  pintarItensBling(id);
+  }catch(e){
+    /* Numa atualização automática que falha, mantém o que já estava na tela. */
+    if(silencioso&&ITB[id]&&ITB[id].itens)return;
+    ITB[id]={erro:e.message,itens:(ITB[id]||{}).itens};
+  }
+  if(!silencioso||JSON.stringify([ITB[id].itens,ITB[id].obs])!==antes)pintarItensBling(id);
 }
+/* Com a OS aberta na tela, os itens se atualizam sozinhos a cada minuto e
+   quando o app volta a ficar visível. */
+function atualizarItensAberta(){
+  var o=S.abertaId&&S.modo==='detalhe'&&getOS(S.abertaId);
+  if(o&&mostraItensBling(o)&&document.visibilityState==='visible')carregarItensBling(o.id,true);
+}
+setInterval(atualizarItensAberta,60000);
+document.addEventListener('visibilitychange',atualizarItensAberta);
 function pintarItensBling(id){var el=$('itb-'+id);if(el)el.outerHTML=itensBlingHtml(getOS(id));}
 function itensBlingHtml(o){
   if(!mostraItensBling(o))return'';
@@ -1451,7 +1464,7 @@ function itensBlingHtml(o){
     });
     if(x.obs)h+='<div class="sec">Observações do serviço</div><div style="white-space:pre-wrap;font-size:13px;">'+esc(x.obs)+'</div>';
   }
-  h+='<div style="text-align:right;margin-top:8px;"><button class="btn btn-g btn-sm" onclick="carregarItensBling(\''+o.id+'\')">'+(x.carregando?'Atualizando…':'↻ Atualizar do Bling')+'</button></div></div>';
+  h+='<div class="hint" style="margin-top:8px;">Atualiza sozinho com o Bling a cada minuto'+(x.em?' · última vez às '+fmtDH(x.em).slice(11):'')+'.</div></div>';
   return h;
 }
 function refreshDetalhe(){var o=S.abertaId&&getOS(S.abertaId);if(o&&$('mdl-b'))$('mdl-b').innerHTML=detalheHtml(o,S.midias);}
