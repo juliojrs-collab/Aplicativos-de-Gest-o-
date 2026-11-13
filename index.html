@@ -1409,8 +1409,50 @@ async function abrirOS(id){
   var o=getOS(id);if(!o)return;
   S.abertaId=id;S.modo='detalhe';S.midias=null;lerNova(id);
   modal(esc(osLabel(o))+' · '+esc(o.cliente&&o.cliente.nome||''),detalheHtml(o,null));
+  if(mostraItensBling(o))carregarItensBling(id);
   try{var m=await carregarMidias(id);if(S.abertaId===id){S.midias=m;$('mdl-b').innerHTML=detalheHtml(getOS(id)||o,m);}}
   catch(e){var g=$('det-mid');if(g)g.innerHTML='<div class="err">Erro ao carregar fotos: '+esc(e.message)+'</div>';}
+}
+/* ═══ Peças e serviços do Bling ══════════════════════════════════════════
+   Depois do orçamento, o vendedor lança na OS do Bling o que foi vendido. A
+   OS aberta no app busca esses itens no Bling, para a manutenção saber o que
+   trocar e fazer sem abrir o Bling. A manutenção vê só nome e quantidade. */
+var ITB={};
+var ETAPAS_ITENS=['aguardando_aprovacao','aprovado','em_servico','pronto','devolver','entregue'];
+function mostraItensBling(o){return!!(o&&o.blingId&&ETAPAS_ITENS.indexOf(o.etapa)>=0);}
+async function carregarItensBling(id){
+  var o=getOS(id);if(!o||!o.blingId)return;
+  ITB[id]=Object.assign({},ITB[id]||{},{carregando:true});pintarItensBling(id);
+  try{
+    var r=await fetch(API+'/api/bling/os/'+o.blingId+'/itens');
+    var j=await r.json().catch(function(){return{};});
+    if(!r.ok)throw new Error(j.error||('HTTP '+r.status));
+    ITB[id]={itens:j.itens||[],obs:j.observacoesServico||'',em:Date.now()};
+  }catch(e){ITB[id]={erro:e.message,itens:(ITB[id]||{}).itens};}
+  pintarItensBling(id);
+}
+function pintarItensBling(id){var el=$('itb-'+id);if(el)el.outerHTML=itensBlingHtml(getOS(id));}
+function itensBlingHtml(o){
+  if(!mostraItensBling(o))return'';
+  var x=ITB[o.id]||{carregando:true},verValor=ehComercial();
+  var h='<div class="card" id="itb-'+o.id+'"><h3>🔧 Peças e serviços (OS do Bling)</h3>';
+  if(x.carregando&&!x.itens)h+='<div class="sub">Buscando no Bling…</div>';
+  else if(x.erro&&!x.itens)h+='<div class="err">Não consegui buscar no Bling: '+esc(x.erro)+'</div>';
+  else if(!x.itens.length)h+='<div class="sub">Nenhuma peça ou serviço lançado na OS do Bling ainda.</div>';
+  else{
+    var grupos=[['P','Peças a trocar'],['S','Serviços a realizar']];
+    grupos.forEach(function(g){
+      var l=x.itens.filter(function(i){return i.tipo===g[0];});if(!l.length)return;
+      h+='<div class="sec">'+g[1]+'</div>'+l.map(function(i){
+        return'<div style="display:flex;gap:8px;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--border);font-size:14px;">'
+          +'<div><b>'+String(i.qtd).replace('.',',')+'×</b> '+esc(i.nome)+(i.codigo?' <small class="sub">'+esc(i.codigo)+'</small>':'')+'</div>'
+          +(verValor?'<div class="sub" style="white-space:nowrap">'+money(i.qtd*i.valor)+'</div>':'')+'</div>';
+      }).join('');
+    });
+    if(x.obs)h+='<div class="sec">Observações do serviço</div><div style="white-space:pre-wrap;font-size:13px;">'+esc(x.obs)+'</div>';
+  }
+  h+='<div style="text-align:right;margin-top:8px;"><button class="btn btn-g btn-sm" onclick="carregarItensBling(\''+o.id+'\')">'+(x.carregando?'Atualizando…':'↻ Atualizar do Bling')+'</button></div></div>';
+  return h;
 }
 function refreshDetalhe(){var o=S.abertaId&&getOS(S.abertaId);if(o&&$('mdl-b'))$('mdl-b').innerHTML=detalheHtml(o,S.midias);}
 function galeria(midias,grupo){
@@ -1427,6 +1469,9 @@ function detalheHtml(o,midias){
   var h='<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px;">'+etapaBadge(o.etapa)
     +(o.etapa!=='entregue'&&desdeEtapa(o)!=null?'<span class="'+(atrasada(o)?'late':'sub')+'">nesta etapa há '+fmtDur(desdeEtapa(o))+'</span>':'')+'</div>';
   h+=acoesHtml(o);
+  /* Para quem vai executar o serviço, os itens vêm logo no topo. */
+  var itbTopo=ehManutencao()&&(o.etapa==='aprovado'||o.etapa==='em_servico');
+  if(itbTopo)h+=itensBlingHtml(o);
   /* Prazos prometidos ao cliente */
   var pz=o.prazos||{};
   h+='<div class="card"><h3>Prazos informados ao cliente</h3><dl class="kv">'
@@ -1517,6 +1562,7 @@ function detalheHtml(o,midias){
          feito no Bling. precificar() e editarOrc() continuam no código. */
       +'</div></div>';
   }
+  if(!itbTopo)h+=itensBlingHtml(o);
   if(o.servico){
     h+='<div class="card"><h3>Serviço</h3><dl class="kv">'
       +'<dt>Técnico</dt><dd>'+esc(o.tecnico||'-')+'</dd>'
