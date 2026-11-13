@@ -65,6 +65,13 @@ main{max-width:760px;margin:0 auto;padding:14px 14px 96px;}
 .os-main{flex:1;min-width:0;}
 .os-main .t{font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
 .os-main .s{font-size:12px;color:var(--text2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.vend{font-size:12px;color:var(--text2);margin-top:2px;}
+.its-l{font-size:13px;margin-top:4px;line-height:1.35;}
+.its-l div{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.atr{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px;padding-top:8px;border-top:1px dashed var(--border);align-items:center;}
+.atr span{font-size:11px;color:var(--text3);font-weight:700;text-transform:uppercase;}
+.atr .chip{padding:5px 10px;font-size:12px;}
+.atr .chip.on{background:var(--green-light);border-color:var(--green);color:#046c4e;}
 .badges{display:flex;gap:4px;flex-wrap:wrap;margin-top:4px;}
 .badge{display:inline-block;border-radius:20px;padding:3px 9px;font-size:11px;font-weight:700;white-space:nowrap;}
 .b-blue{background:var(--blue-light);color:var(--blue-dark);}
@@ -125,6 +132,7 @@ main{max-width:760px;margin:0 auto;padding:14px 14px 96px;}
    - campo_pedidos  → o registro do atendimento (id = id do pedido no Bling)
    - campo_midias   → uma foto por documento, carregadas só ao abrir o pedido
    - campo_tecnicos → nomes dos técnicos de rua
+   - campo_atribuicoes → técnico que vai fazer cada entrega (id = id do pedido)
    - campo_localizacoes → posição do técnico (ver "Localização" abaixo) */
 var FB_CFG={
   apiKey:"AIzaSyCdRdPIM7fjV-5prMCHs_3eYqS5aARSu5I",
@@ -135,7 +143,7 @@ var FB_CFG={
   appId:"1:132328899335:web:d9e7b99354b51de0a37ba2"
 };
 var API='https://whatsapp-crm-production-66bf.up.railway.app';
-var C_LOC='campo_localizacoes',C_REG='campo_pedidos',C_MID='campo_midias',C_TEC='campo_tecnicos';
+var C_ATR='campo_atribuicoes',C_LOC='campo_localizacoes',C_REG='campo_pedidos',C_MID='campo_midias',C_TEC='campo_tecnicos';
 var MAX_FOTOS=8;
 /* Perguntas obrigatórias do atendimento: respondidas antes da assinatura e
    impressas no PDF. A observação de cada uma é opcional. */
@@ -152,6 +160,7 @@ var S={
   tela:'lista',tecnico:lsGet('campo_tecnico')||'',tecs:[],
   lista:null,listaErr:'',carregando:false,filtro:'hoje',hoje:'',busca:'',
   reg:{},              /* campo_pedidos por id do pedido no Bling */
+  atr:{},soMeus:false, /* campo_atribuicoes: técnico de cada pedido */
   ped:null,pedErr:'',midias:[],enviando:false
 };
 
@@ -173,6 +182,11 @@ function listen(){
   db.collection(C_TEC).onSnapshot(function(snap){
     S.tecs=snap.docs.map(function(d){return d.data().nome||'';}).filter(Boolean).sort(function(a,b){return a.localeCompare(b);});
     if(S.tela==='quem')render();
+    if(S.tela==='lista')desenharItens();
+  },function(){});
+  db.collection(C_ATR).orderBy('em','desc').limit(1000).onSnapshot(function(snap){
+    S.atr={};snap.docs.forEach(function(d){S.atr[d.id]=d.data();});
+    if(S.tela==='lista')renderLista();
   },function(){});
   db.collection(C_REG).orderBy('atualizadoEm','desc').limit(300).onSnapshot(function(snap){
     S.reg={};snap.docs.forEach(function(d){S.reg[d.id]=d.data();});
@@ -259,6 +273,34 @@ function dataPadrao(datas){
   for(var i=0;i<datas.length;i++)if(datas[i]>=h)return datas[i];
   return datas[datas.length-1]||'';
 }
+function tecDe(id){var a=S.atr[String(id)];return a&&a.tecnico||'';}
+function ehMeu(o){return semAcento(tecDe(o.id))===semAcento(S.tecnico);}
+/* Marca (ou desmarca, no segundo toque) o técnico que vai fazer a entrega. */
+function atribuir(ev,id,i){
+  ev.stopPropagation();
+  var nome=S.tecs[i],k=String(id);
+  if(tecDe(id)===nome){delete S.atr[k];db.collection(C_ATR).doc(k).delete().catch(function(e){toast('Erro: '+e.message);});}
+  else{
+    var o=(S.lista||[]).filter(function(x){return String(x.id)===k;})[0]||{};
+    var d={tecnico:nome,por:S.tecnico,em:Date.now(),numero:o.numero||'',dataPrevista:o.dataPrevista||''};
+    S.atr[k]=d;db.collection(C_ATR).doc(k).set(d).catch(function(e){toast('Erro: '+e.message);});
+  }
+  desenharItens();
+}
+function atrHtml(o){
+  var t=tecDe(o.id);
+  if(!S.tecs.length)return t?'<div class="atr"><span>Técnico</span><button class="chip on">✔ '+esc(t)+'</button></div>':'';
+  var nomes=S.tecs.slice();if(t&&nomes.indexOf(t)<0)nomes.push(t);
+  return'<div class="atr" onclick="event.stopPropagation()"><span>Técnico</span>'
+    +nomes.map(function(n){var i=S.tecs.indexOf(n);return'<button class="chip'+(n===t?' on':'')+'"'+(i<0?' disabled':' onclick="atribuir(event,'+o.id+','+i+')"')+'>'+(n===t?'✔ ':'')+esc(n)+'</button>';}).join('')+'</div>';
+}
+function itensResumo(o){
+  if(o.itens==null)return'<div class="its-l sub">Itens: abra o pedido para ver</div>';
+  if(!o.itens.length)return'';
+  var max=4,h=o.itens.slice(0,max).map(function(i){var q=Number(i.qtd)||0;return'<div>'+(q?(q%1?q.toFixed(2).replace('.',','):q)+'× ':'')+esc(i.descricao)+'</div>';}).join('');
+  if(o.itens.length>max)h+='<div class="sub">+ '+(o.itens.length-max)+' ite'+(o.itens.length-max===1?'m':'ns')+'</div>';
+  return'<div class="its-l">'+h+'</div>';
+}
 function idsAssinados(){return Object.keys(S.reg).filter(function(id){return!!S.reg[id].assinatura;});}
 function statusReg(id){
   var r=S.reg[String(id)];
@@ -276,6 +318,7 @@ function renderLista(){
     +'<div class="chips" id="chips-datas">'
     +dl.datas.map(function(d){return'<button class="chip'+(S.filtro===d?' on':'')+'" data-d="'+d+'" onclick="filtrar(\''+d+'\')">'+esc(rotuloDia(d))+' ('+dl.cont[d]+')</button>';}).join('')
     +'</div><div class="chips">'
+    +'<button class="chip'+(S.soMeus?' on':'')+'" onclick="S.soMeus=!S.soMeus;renderLista()">👷 Só os meus ('+(S.lista||[]).filter(function(o){return ehMeu(o)&&(S.filtro==='feitas'||prev(o)===S.filtro);}).length+')</button>'
     +'<button class="chip'+(S.filtro==='feitas'?' on':'')+'" onclick="filtrar(\'feitas\')">✍️ Assinados ('+idsAssinados().length+')</button>'
     +'<button class="chip" onclick="carregarLista()">'+(S.carregando?'<span class="spin"></span>':'↻')+' Atualizar</button></div>';
   if(S.listaErr)h+='<div class="err">Não foi possível buscar os pedidos no Bling: '+esc(S.listaErr)+'</div>';
@@ -300,8 +343,9 @@ function desenharItens(){
   }else{
     lista=lista.filter(function(o){return prev(o)===S.filtro;});
   }
+  if(S.soMeus)lista=lista.filter(ehMeu);
   if(!lista.length){
-    var msg=S.carregando||!S.lista?'':S.filtro==='feitas'&&!busca?'Nenhum pedido assinado ainda.':busca?'Nenhum pedido encontrado.':'Nenhuma entrega prevista de 7 dias atrás em diante.';
+    var msg=S.carregando||!S.lista?'':S.soMeus?'Nenhuma entrega marcada para você nesta data.':S.filtro==='feitas'&&!busca?'Nenhum pedido assinado ainda.':busca?'Nenhum pedido encontrado.':'Nenhuma entrega prevista de 7 dias atrás em diante.';
     el.innerHTML=msg?'<div class="empty">'+msg+'</div>':'';return;
   }
   el.innerHTML=lista.map(function(o){
@@ -310,7 +354,10 @@ function desenharItens(){
       +'<div class="os-num">'+esc(o.numero||'s/ nº')+'</div>'
       +'<div class="os-main"><div class="t">'+esc(o.cliente||'Cliente')+'</div>'
       +'<div class="s">'+(o.total?money(o.total):'')+((busca||S.filtro==='feitas')&&d?' · entrega '+fmtData(d):'')+'</div>'
-      +'<div class="badges">'+(o._em?'<span class="badge b-gray">'+fmtDH(o._em)+'</span>':'')+statusReg(o.id)+'</div></div></div>';
+      +(o.vendedor?'<div class="vend">Vendedor: <b>'+esc(o.vendedor)+'</b></div>':'')
+      +itensResumo(o)
+      +'<div class="badges">'+(o._em?'<span class="badge b-gray">'+fmtDH(o._em)+'</span>':'')+statusReg(o.id)+'</div>'
+      +atrHtml(o)+'</div></div>';
   }).join('');
 }
 
@@ -363,6 +410,7 @@ function renderPedido(){
     +(o.dataPrevista?'<dt>Entrega</dt><dd><b>'+fmtData(o.dataPrevista)+'</b></dd>':'')
     
     +(o.vendedor?'<dt>Vendedor</dt><dd>'+esc(o.vendedor)+'</dd>':'')
+    +(tecDe(o.id)?'<dt>Técnico</dt><dd>'+esc(tecDe(o.id))+'</dd>':'')
     +(o.observacoes?'<dt>Observações</dt><dd>'+esc(o.observacoes)+'</dd>':'')
     +'</dl>'+itensHtml(o)+'</div>';
 
