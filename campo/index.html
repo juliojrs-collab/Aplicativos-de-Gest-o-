@@ -34,6 +34,25 @@ a{color:var(--blue);}
 .top .back{background:none;border:none;color:#fff;font-size:22px;line-height:1;padding:0 4px;}
 .top .who{background:rgba(255,255,255,.18);border:none;color:#fff;border-radius:20px;padding:5px 10px;font-size:12px;font-weight:600;max-width:45vw;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
 main{max-width:760px;margin:0 auto;padding:14px 14px 96px;}
+body.largo main{max-width:none;}
+.kb{display:flex;gap:10px;overflow-x:auto;align-items:flex-start;padding-bottom:10px;}
+.kb-col{flex:1 0 240px;max-width:360px;background:#e8eef3;border-radius:var(--r);padding:8px;min-height:180px;display:flex;flex-direction:column;}
+.kb-col.livre{background:#f3eee2;}
+.kb-col.alvo{outline:3px dashed var(--blue);outline-offset:-3px;background:var(--blue-light);}
+.kb-h{padding:4px 4px 8px;}
+.kb-h b{font-size:14px;}
+.kb-h .sub{display:block;margin-top:2px;}
+.kb-r{font-size:12px;margin-top:6px;display:flex;gap:6px;flex-wrap:wrap;}
+.kb-r .btn{padding:5px 8px;font-size:12px;}
+.kb-b{flex:1;display:flex;flex-direction:column;gap:6px;min-height:60px;}
+.kb-c{background:#fff;border-radius:8px;box-shadow:var(--sh);padding:8px 10px;cursor:grab;font-size:13px;border:2px solid transparent;}
+.kb-c.sel{border-color:var(--blue);box-shadow:var(--sh2);}
+.kb-c .t{font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.kb-c .its-l{font-size:12px;margin-top:2px;}
+.kb-c .x{font-size:11px;color:var(--text2);display:flex;justify-content:space-between;gap:6px;margin-top:4px;}
+.kb-c .x a{color:var(--blue);}
+.kb-vazio{color:var(--text3);font-size:12px;text-align:center;padding:16px 6px;border:2px dashed #cfd8df;border-radius:8px;}
+.kb-dica{font-size:12px;color:var(--text2);margin-bottom:8px;}
 .sub{color:var(--text2);font-size:12px;}
 .card{background:var(--surface);border-radius:var(--r);box-shadow:var(--sh);padding:14px 16px;margin-bottom:12px;}
 .card h3{font-size:14px;margin-bottom:10px;}
@@ -180,7 +199,7 @@ var S={
   lista:null,listaErr:'',carregando:false,filtro:'hoje',hoje:'',busca:'',
   reg:{},              /* campo_pedidos por id do pedido no Bling */
   atr:{},aba:'',        /* campo_atribuicoes: técnico de cada pedido; aba = técnico escolhido ('' todos, '__sem' sem técnico) */
-  rotas:{},rota:null,   /* campo_rotas por id; rota = a aberta na tela de rota */
+  rotas:{},rota:null,visao:lsGet('campo_visao')||'lista',kbSel:null,   /* campo_rotas por id; rota = a aberta na tela de rota */
   ped:null,pedErr:'',midias:[],enviando:false
 };
 
@@ -327,8 +346,14 @@ function ehMeu(o){return semAcento(tecDe(o.id))===semAcento(S.tecnico);}
 /* Marca (ou desmarca, no segundo toque) o técnico que vai fazer a entrega. */
 function atribuir(ev,id,i){
   ev.stopPropagation();
-  var nome=S.tecsRua[i],k=String(id);
-  if(tecDe(id)===nome){delete S.atr[k];db.collection(C_ATR).doc(k).delete().catch(function(e){toast('Erro: '+e.message);});}
+  var nome=S.tecsRua[i];
+  atribuirNome(id,tecDe(id)===nome?'':nome);
+}
+/* nome vazio = tira o técnico do pedido. */
+function atribuirNome(id,nome){
+  var k=String(id);
+  if(tecDe(id)===nome)return;
+  if(!nome){delete S.atr[k];db.collection(C_ATR).doc(k).delete().catch(function(e){toast('Erro: '+e.message);});}
   else{
     var o=(S.lista||[]).filter(function(x){return String(x.id)===k;})[0]||{};
     var d={tecnico:nome,por:S.tecnico,em:Date.now(),numero:o.numero||'',dataPrevista:o.dataPrevista||''};
@@ -370,7 +395,8 @@ function renderLista(){
     +'</div><div class="chips" id="chips-tec"></div><div class="chips">'
     +'<button class="chip'+(S.filtro==='feitas'?' on':'')+'" onclick="filtrar(\'feitas\')">✍️ Assinados ('+idsAssinados().length+')</button>'
     +'<button class="chip" onclick="carregarLista()">'+(S.carregando?'<span class="spin"></span>':'↻')+' Atualizar</button>'
-    +(ehTec()?'':'<a class="chip" style="text-decoration:none;" href="mapa/" target="_blank" rel="noopener">📍 Mapa dos técnicos</a>')+'</div>';
+    +(ehTec()?'':'<a class="chip" style="text-decoration:none;" href="mapa/" target="_blank" rel="noopener">📍 Mapa dos técnicos</a>')+'</div>'
+    +(ehTec()?'':'<div class="chips"><button class="chip'+(S.visao==='lista'?' on':'')+'" onclick="mudarVisao(\'lista\')">📋 Lista</button><button class="chip'+(S.visao==='quadro'?' on':'')+'" onclick="mudarVisao(\'quadro\')">🗂️ Quadro por técnico</button></div>');
   if(S.listaErr)h+='<div class="err">Não foi possível buscar os pedidos no Bling: '+esc(S.listaErr)+'</div>';
   if(S.carregando&&!S.lista)h+='<div class="info"><span class="spin"></span> Buscando as entregas no Bling…</div>';
   h+='<div id="itens"></div>';
@@ -381,6 +407,7 @@ function renderLista(){
   desenharItens();
 }
 function filtrar(f){S.filtro=f;renderLista();}
+function mudarVisao(v){S.visao=v;S.kbSel=null;lsSet('campo_visao',v);renderLista();}
 function escolherAba(i){S.aba=i==='todos'?'':i==='sem'?'__sem':S.tecsRua[i];desenharItens();}
 /* Uma aba por técnico na data escolhida, com a quantidade de entregas dele. */
 function abasHtml(doDia){
@@ -408,6 +435,9 @@ function desenharItens(){
   if(ehTec())S.aba=S.tecnico;
   if(abas){abas.style.display=porData&&!ehTec()?'':'none';if(porData&&!ehTec())abas.innerHTML=abasHtml(lista);}
   var topo='';
+  var quadro=porData&&!ehTec()&&S.visao==='quadro';
+  document.body.classList.toggle('largo',quadro&&S.tela==='lista');
+  if(quadro){if(abas)abas.style.display='none';el.innerHTML=(lista.length?'<div style="max-width:760px">'+painelTodas(S.filtro,lista)+'</div>':'')+quadroHtml(S.filtro,lista);return;}
   if(porData&&!S.aba&&lista.length)topo=painelTodas(S.filtro,lista);
   if(porData&&S.aba){
     lista=lista.filter(function(o){return S.aba==='__sem'?!tecDe(o.id):tecDe(o.id)===S.aba;});
@@ -435,6 +465,64 @@ function desenharItens(){
       +'<div class="badges">'+(o._em?'<span class="badge b-gray">'+fmtDH(o._em)+'</span>':'')+statusReg(o.id)+'</div>'
       +atrHtml(o)+'</div></div>';
   }).join('');
+}
+
+/* ═══ Quadro do comercial ════════════════════════════════════════════════
+   Coluna "A distribuir" (pedidos da data sem técnico) e uma coluna por
+   técnico de rua. No computador, arrasta o pedido; no celular, toca no
+   pedido e depois na coluna. Cada coluna monta ou mostra a rota do técnico. */
+function kbCard(o){
+  return'<div class="kb-c'+(S.kbSel===o.id?' sel':'')+'" draggable="true" data-id="'+o.id+'" ondragstart="kbDrag(event,'+o.id+')" onclick="kbClique(event,'+o.id+')">'
+    +'<div class="t">'+(o._rota?'<span class="ord" style="font-size:11px;">'+o._rota.n+'º '+esc(o._rota.h)+'</span> ':'')+esc(o.numero)+' · '+esc(o.cliente||'Cliente')+'</div>'
+    +itensResumo(o)
+    +'<div class="x"><span>'+(o.vendedor?esc(o.vendedor):'')+(o.total?' · '+money(o.total):'')+'</span><a href="#" onclick="event.stopPropagation();event.preventDefault();abrirPedido('+o.id+')">abrir</a></div>'
+    +'<div class="badges">'+statusReg(o.id)+'</div></div>';
+}
+function quadroHtml(dia,doDia){
+  var livres=doDia.filter(function(o){return!tecDe(o.id);});
+  var cols=S.tecsRua.slice();doDia.forEach(function(o){var t=tecDe(o.id);if(t&&cols.indexOf(t)<0)cols.push(t);});
+  var h='<div class="kb-dica">'+(S.kbSel?'<b>Pedido selecionado.</b> Toque na coluna do técnico (ou em "A distribuir") para mover. <a href="#" onclick="event.preventDefault();S.kbSel=null;desenharItens()">cancelar</a>'
+    :'Arraste cada pedido para a coluna do técnico — no celular, toque no pedido e depois na coluna.')+'</div><div class="kb">';
+  h+='<div class="kb-col livre" data-tec="" ondragover="kbSobre(event)" ondragleave="kbSai(event)" ondrop="kbSolta(event,\'\')" onclick="kbColuna(\'\')">'
+    +'<div class="kb-h"><b>📥 A distribuir ('+livres.length+')</b><span class="sub">Entregas sem técnico</span></div><div class="kb-b">'
+    +(livres.length?livres.map(kbCard).join(''):'<div class="kb-vazio">Tudo distribuído ✔</div>')+'</div></div>';
+  cols.forEach(function(t,ci){
+    var meus=doDia.filter(function(o){return tecDe(o.id)===t;});
+    var ro=rotaDe(dia,t),res=ro&&ro.resultado,pos={};
+    if(res)res.paradas.forEach(function(p,i){pos[p.id]={n:i+1,h:p.chegada};});
+    meus.sort(function(a,b){return(pos[a.id]?pos[a.id].n:999)-(pos[b.id]?pos[b.id].n:999);});
+    meus.forEach(function(o){o._rota=pos[o.id]||null;});
+    var ids=meus.map(function(o){return o.id;}).sort().join(','),idsR=res?res.paradas.map(function(p){return p.id;}).concat(res.naoLocalizados.map(function(p){return p.id;})).sort().join(','):'';
+    var tj=JSON.stringify(t).replace(/"/g,'&quot;');
+    h+='<div class="kb-col" data-tec="'+esc(t)+'" ondragover="kbSobre(event)" ondragleave="kbSai(event)" ondrop="kbSolta(event,'+tj+')" onclick="kbColuna('+tj+')">'
+      +'<div class="kb-h"><b>👷 '+esc(t)+' ('+meus.length+')</b>'
+      +'<div class="kb-r" onclick="event.stopPropagation()">'
+      +(res?(ids===idsR?'<span>🗺️ '+String(res.distanciaKm).replace('.',',')+' km · volta '+esc(res.volta)+'</span>':'<span style="color:var(--red)">⚠️ rota desatualizada</span>')
+          +'<button class="btn btn-g" onclick="abrirRota(\''+esc(dia)+'\','+tj+')">Ver rota</button>'
+          +(ids!==idsR&&meus.length?'<button class="btn btn-p" onclick="kbMontar('+tj+')">↻ Montar de novo</button>':'')
+        :(meus.length?'<button class="btn btn-p" onclick="kbMontar('+tj+')">🗺️ Montar rota</button>':''))
+      +'</div></div><div class="kb-b">'
+      +(meus.length?meus.map(kbCard).join(''):'<div class="kb-vazio">Arraste entregas para cá</div>')+'</div></div>';
+  });
+  return h+'</div>';
+}
+var _kbArrasto=null;
+function kbDrag(ev,id){_kbArrasto=id;try{ev.dataTransfer.setData('text/plain',String(id));ev.dataTransfer.effectAllowed='move';}catch(e){}}
+function kbSobre(ev){ev.preventDefault();ev.currentTarget.classList.add('alvo');}
+function kbSai(ev){ev.currentTarget.classList.remove('alvo');}
+function kbSolta(ev,tec){
+  ev.preventDefault();ev.stopPropagation();ev.currentTarget.classList.remove('alvo');
+  var id=Number((ev.dataTransfer&&ev.dataTransfer.getData('text/plain'))||_kbArrasto);_kbArrasto=null;
+  if(id){atribuirNome(id,tec);S.kbSel=null;desenharItens();}
+}
+function kbClique(ev,id){ev.stopPropagation();S.kbSel=S.kbSel===id?null:id;desenharItens();}
+function kbColuna(tec){if(!S.kbSel)return;atribuirNome(S.kbSel,tec);S.kbSel=null;desenharItens();}
+async function kbMontar(tec){
+  var dia=S.filtro,ids=idsDoTecnico(dia,tec);if(!ids.length)return;
+  toast('Montando a rota de '+tec+'…');
+  try{await calcularRota(dia,tec,ids,ROTA_CFG.saida,ROTA_CFG.parada,false);toast('Rota de '+tec+' montada ✔');}
+  catch(e){alert('Não foi possível montar a rota de '+tec+':\n\n'+e.message);}
+  if(S.tela==='lista')desenharItens();
 }
 
 /* ═══ Rota do técnico ════════════════════════════════════════════════════
@@ -523,6 +611,7 @@ async function montarRota(ordemManual){
 function abrirRota(dia,tec,substituir){
   var ro=rotaDe(dia,tec);if(!ro)return;
   S.rota={dia:dia,tecnico:tec,ordem:ro.resultado.paradas.slice(),alterada:false};
+  document.body.classList.remove('largo');
   if(S.tela!=='rota'){S.tela='rota';if(!substituir)history.pushState({rota:1},'');}
   window.scrollTo(0,0);renderRota();
 }
@@ -621,6 +710,7 @@ function desenharMapaRota(res,ordem){
 /* ═══ Pedido aberto ═════════════════════════════════════════════════════ */
 function regAtual(){return S.ped&&S.reg[String(S.ped.id)]||{};}
 async function abrirPedido(id){
+  document.body.classList.remove('largo');
   S.tela='ped';S.ped={id:id,_carregando:true};S.pedErr='';S.midias=[];
   window.scrollTo(0,0);renderPedido();
   history.pushState({ped:id},'');
