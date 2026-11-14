@@ -152,6 +152,8 @@ var CHECK=[
   {k:'pressao',p:'Qual a pressão do local?',o:['Baixa','Normal','Alta','Não foi possível medir'],obs:'Valor medido ou observação (opcional)'},
   {k:'mangueiras',p:'As mangueiras estão ressecadas ou foram trocadas há mais de um ano?',o:['Sim','Não','Trocadas neste atendimento','Não verificado'],obs:'Observação (opcional)'}
 ];
+/* Pagamento na entrega: obrigatório dizer se foi feito e, se sim, a forma. */
+var FORMAS_PAG=['Pix','Dinheiro','Cartão de crédito','Cartão de débito','Boleto','Outro'];
 var TERMO='Declaro que recebi nesta data os produtos e/ou serviços descritos neste pedido, nas condições registradas acima.';
 
 /* ═══ Estado ═════════════════════════════════════════════════════════════ */
@@ -422,6 +424,7 @@ function renderPedido(){
     +'</div>'+(assinado?'':'<div class="addbar"><button class="btn btn-g" onclick="addFoto(true)">📷 Tirar foto</button><button class="btn btn-g" onclick="addFoto(false)">🖼 Galeria</button></div>')
     +'<div class="sub" id="foto-st"></div></div>'
     +checkHtml(r.checklist||{},assinado)
+    +pagHtml(r.pagamento||{},assinado)
     +'<div class="field"><label>Observações do técnico</label><textarea id="obs" rows="4" placeholder="O que foi entregue/instalado, pendências…"'+trava+' onchange="salvarCampos()">'+esc(r.obs||'')+'</textarea></div>'
     +'<div class="g2"><div class="field"><label>Quem recebeu / assinou <span class="req">*</span></label><input id="rec-nome" value="'+esc(r.recebedor?r.recebedor.nome:(c.nome||''))+'"'+trava+' onchange="salvarCampos()"/></div>'
     +'<div class="field"><label>Documento (CPF ou RG)</label><input id="rec-doc" inputmode="numeric" value="'+esc(r.recebedor?r.recebedor.doc:'')+'"'+trava+' onchange="salvarCampos()"/></div></div>'
@@ -456,6 +459,28 @@ function checkHtml(ck,trava){
       +q.o.map(function(op){return'<button type="button" class="chip'+(a.r===op?' on':'')+'"'+(trava?' disabled':'')+' data-v="'+esc(op)+'" onclick="ckSel(\''+q.k+'\',this)">'+esc(op)+'</button>';}).join('')
       +'</div><input id="ck-'+q.k+'-obs" placeholder="'+esc(q.obs)+'" style="margin-top:6px;font-size:14px;" value="'+esc(a.obs||'')+'"'+(trava?' disabled':'')+' onchange="salvarCampos()"/></div>';
   }).join('');
+}
+function pagHtml(pg,trava){
+  var dis=trava?' disabled':'';
+  function chips(id,ops,atual){return'<div class="opts" id="'+id+'">'+ops.map(function(op){return'<button type="button" class="chip'+(atual===op?' on':'')+'"'+dis+' data-v="'+esc(op)+'" onclick="pagSel(this)">'+esc(op)+'</button>';}).join('')+'</div>';}
+  return'<div class="field" id="pag"><label>Pagamento: foi feito na entrega? <span class="req">*</span></label>'+chips('pag-feito',['Sim','Não'],pg.feito)
+    +'<div id="pag-sim" style="margin-top:10px;'+(pg.feito==='Sim'?'':'display:none')+'"><label>Como foi pago? <span class="req">*</span></label>'+chips('pag-forma',FORMAS_PAG,pg.forma)+'</div>'
+    +'<input id="pag-obs" placeholder="'+(pg.feito==='Não'?'Como ficou combinado? (opcional)':'Valor recebido, parcelas ou observação (opcional)')+'" style="margin-top:6px;font-size:14px;" value="'+esc(pg.obs||'')+'"'+dis+' onchange="salvarCampos()"/></div>';
+}
+function pagSel(btn){
+  Array.prototype.forEach.call(btn.parentNode.children,function(b){b.classList.toggle('on',b===btn);});
+  if(btn.parentNode.id==='pag-feito'){
+    var sim=btn.getAttribute('data-v')==='Sim';
+    $('pag-sim').style.display=sim?'':'none';
+    $('pag-obs').placeholder=sim?'Valor recebido, parcelas ou observação (opcional)':'Como ficou combinado? (opcional)';
+  }
+  salvarCampos();
+}
+function pagLer(){
+  if(!$('pag'))return null;
+  var f=$('pag-feito').querySelector('.chip.on'),m=$('pag-forma').querySelector('.chip.on');
+  var feito=f?f.getAttribute('data-v'):'';
+  return{feito:feito,forma:feito==='Sim'&&m?m.getAttribute('data-v'):'',obs:val('pag-obs')};
 }
 function ckSel(k,btn){
   Array.prototype.forEach.call(btn.parentNode.children,function(b){b.classList.toggle('on',b===btn);});
@@ -494,6 +519,7 @@ function salvarCampos(extra){
   var r=regBase();
   if($('obs'))r.obs=val('obs');
   if($('ck-'+CHECK[0].k))r.checklist=ckLer();
+  if($('pag'))r.pagamento=pagLer();
   if($('rec-nome'))r.recebedor={nome:val('rec-nome'),doc:val('rec-doc')};
   if(extra)for(var k in extra)r[k]=extra[k];
   var id=String(S.ped.id);
@@ -561,6 +587,11 @@ function assinar(){
   if(falta.length){
     toast(falta.length===1?'Responda a pergunta '+(CHECK.indexOf(falta[0])+1)+' antes da assinatura':'Responda as perguntas '+falta.map(function(q){return CHECK.indexOf(q)+1;}).join(', ')+' antes da assinatura');
     $('ck-'+falta[0].k).scrollIntoView({behavior:'smooth',block:'center'});return;
+  }
+  var pg=pagLer();
+  if(pg&&(!pg.feito||(pg.feito==='Sim'&&!pg.forma))){
+    toast(!pg.feito?'Informe se o pagamento foi feito':'Informe como o pagamento foi feito');
+    $('pag').scrollIntoView({behavior:'smooth',block:'center'});return;
   }
   var nome=val('rec-nome');
   if(!nome){toast('Preencha quem está recebendo/assinando');$('rec-nome').focus();return;}
@@ -791,6 +822,12 @@ async function montarPdf(){
       doc.setFont('helvetica','bold');doc.text(lq,ML+2,y);y+=lq.length*4.5;
       doc.setFont('helvetica','normal');doc.text(la,ML+8,y);y+=la.length*4.5+1.5;
     });
+  }
+  var pg=r.pagamento;
+  if(pg&&pg.feito){
+    section('Pagamento');
+    line('Pago na entrega',pg.feito==='Sim'?'Sim — '+(pg.forma||'-'):'Não');
+    line(pg.feito==='Sim'?'Observação':'Combinado',pg.obs);
   }
   if(r.obs){section('Observações do técnico');texto(r.obs);}
   var fotos=S.midias.filter(function(m){return m.data;});
