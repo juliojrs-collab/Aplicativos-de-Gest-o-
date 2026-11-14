@@ -2455,6 +2455,23 @@ function vPainel(){
   var h='<div class="ph"><div><h2>Medição</h2><p class="sub">Tempo de cada etapa, contado em horas corridas (inclui noites e fins de semana).</p></div>'
     +'<div class="chips" style="margin:0">'+[[7,'7 dias'],[30,'30 dias'],[90,'90 dias'],[0,'Tudo']].map(function(p){
       return'<button class="chip'+(dias===p[0]?' on':'')+'" onclick="S.dash.dias='+p[0]+';render()">'+p[1]+'</button>';}).join('')+'</div></div>';
+  /* Por técnico: quantos orçamentos e manutenções ele terminou no período e a
+     média de cada um (início → fim). Conta pela data em que terminou. */
+  var tecs={};
+  S.os.forEach(function(o){
+    var t=o.tempos||{};if(o.importado)return;
+    if(o.tecnicoOrc&&t.orcIni&&t.orcFim&&t.orcFim>=desde){(tecs[o.tecnicoOrc]=tecs[o.tecnicoOrc]||{orc:[],exe:[]}).orc.push(t.orcFim-t.orcIni);}
+    if(o.tecnico&&t.servIni&&t.servFim&&t.servFim>=desde){(tecs[o.tecnico]=tecs[o.tecnico]||{orc:[],exe:[]}).exe.push(t.servFim-t.servIni);}
+  });
+  var nt=Object.keys(tecs).sort();
+  h+='<div class="card"><h3>Por técnico</h3>'+(nt.length?nt.map(function(n){var x=tecs[n];
+      return'<div style="padding:10px 0;border-bottom:1px solid var(--border);"><b style="font-size:15px;">'+esc(n)+'</b>'
+        +'<div class="kpis" style="margin:8px 0 0;grid-template-columns:1fr 1fr;">'
+        +'<div class="kpi"><div class="l">Orçamentos feitos</div><div class="v">'+x.orc.length+'</div><div class="h">tempo médio: '+(x.orc.length?fmtDur(media(x.orc)):'—')+'</div></div>'
+        +'<div class="kpi"><div class="l">Manutenções feitas</div><div class="v">'+x.exe.length+'</div><div class="h">tempo médio: '+(x.exe.length?fmtDur(media(x.exe)):'—')+'</div></div>'
+        +'</div></div>';}).join('')
+    +'<div class="hint" style="margin-top:8px;">Conta o que o técnico terminou no período escolhido acima. Tempo médio = do “iniciar” ao “finalizar”.</div>'
+    :'<div class="sub">Nenhum orçamento ou manutenção terminado no período.</div>')+'</div>';
   h+='<div class="kpis">'
     +'<div class="kpi"><div class="l">Recebidas</div><div class="v">'+per.length+'</div><div class="h">no período</div></div>'
     +'<div class="kpi"><div class="l">Entregues</div><div class="v">'+entregues.length+'</div><div class="h">das recebidas no período</div></div>'
@@ -2471,19 +2488,6 @@ function vPainel(){
     var m=media(porTrecho[x.k]);
     return'<div class="row"><div>'+esc(x.l)+' <span class="sub">('+porTrecho[x.k].length+')</span></div><div class="trk"><div class="fill" style="width:'+(m?Math.max(2,m/maxM*100):0)+'%"></div></div><div class="val">'+fmtDur(m)+'</div></div>';
   }).join('')+'</div><div class="hint">Entre parênteses: quantas OS tiveram a etapa medida. Barras maiores mostram onde o aparelho fica mais tempo parado.</div></div>';
-  /* Por técnico */
-  var tecs={};
-  per.forEach(function(o){
-    var d=duracoes(o);
-    if(o.tecnicoOrc&&d.orcamento!=null){(tecs[o.tecnicoOrc]=tecs[o.tecnicoOrc]||{orc:[],exe:[]}).orc.push(d.orcamento);}
-    if(o.tecnico&&d.execucao!=null){(tecs[o.tecnico]=tecs[o.tecnico]||{orc:[],exe:[]}).exe.push(d.execucao);}
-    /* Prazo do técnico: terminou o serviço até a data que ele mesmo previu? */
-    if(o.tecnico&&o.tempos.servFim&&o.prazos&&o.prazos.entrega){var tt=(tecs[o.tecnico]=tecs[o.tecnico]||{orc:[],exe:[]});tt.pz=(tt.pz||0)+1;if(o.tempos.servFim<=fimDoDia(o.prazos.entrega))tt.ok=(tt.ok||0)+1;}
-  });
-  var nt=Object.keys(tecs).sort();
-  h+='<div class="card"><h3>Por técnico</h3>'+(nt.length?'<div class="tw"><table><thead><tr><th>Técnico</th><th>Orçamentos</th><th>Tempo médio orçamento</th><th>Serviços</th><th>Tempo médio execução</th><th>Serviços no prazo</th></tr></thead><tbody>'
-    +nt.map(function(n){var x=tecs[n];return'<tr><td><b>'+esc(n)+'</b></td><td>'+x.orc.length+'</td><td>'+fmtDur(media(x.orc))+'</td><td>'+x.exe.length+'</td><td>'+fmtDur(media(x.exe))+'</td><td>'+(x.pz?Math.round((x.ok||0)/x.pz*100)+'% ('+(x.ok||0)+' de '+x.pz+')':'-')+'</td></tr>';}).join('')
-    +'</tbody></table></div>':'<div class="sub">Ainda sem orçamentos ou serviços finalizados no período.</div>')+'</div>';
   /* Comercial: do orçamento técnico pronto até o envio ao cliente (o preço é
      montado no Bling, no meio desse tempo). */
   var coms={};
