@@ -444,7 +444,7 @@ function num(v){var n=parseFloat(String(v||'').replace(',','.'));return isNaN(n)
 function etapaBadge(k){var e=ET[k]||{l:k,c:'b-gray'};return'<span class="badge '+(doOutro(k)&&!ehExterno()?'b-gray':e.c)+'">'+esc(rotuloEtapa(k))+'</span>';}
 function aparelho(o){return((o.marca||'')+' '+(o.modelo||'')).trim()||'Purificador';}
 function osLabel(o){return o.numero?'OS '+o.numero:'OS s/ nº';}
-function desdeEtapa(o){var e=ET[o.etapa];var t=e&&o.tempos[e.t];return t?Date.now()-t:null;}
+function desdeEtapa(o){var e=ET[o.etapa];var t=o.etapa==='devolver'&&o.tempos.desistiu||e&&o.tempos[e.t];return t?Date.now()-t:null;}
 function atrasada(o){var lim=ALERTA_H[o.etapa];var d=desdeEtapa(o);return lim&&d!=null&&d>lim*3600000;}
 function duracoes(o){
   var t=o.tempos||{},r={};
@@ -1499,7 +1499,7 @@ function detalheHtml(o,midias){
     {k:'orcIni',l:'Orçamento iniciado',quem:o.tecnicoOrc,dur:d.esperaOrc,durL:'espera'},
     {k:'orcFim',l:'Orçamento técnico finalizado',quem:o.tecnicoOrc,dur:d.orcamento,durL:'orçamento'},
     {k:'informado',l:'Orçamento enviado ao cliente',quem:o.informadoPor,dur:d.preco,durL:'comercial até enviar'},
-    {k:'resposta',l:o.aprovado===false?'Cliente NÃO aprovou':'Cliente aprovou',dur:d.cliente,durL:'resposta do cliente'}
+    {k:'resposta',l:o.aprovado===false&&!o.desistencia?'Cliente NÃO aprovou':'Cliente aprovou',dur:d.cliente,durL:'resposta do cliente'}
   ];
   /* OS antigas não registraram quando o cliente foi informado. */
   if(!t.informado&&t.resposta)passos.splice(3,1);
@@ -1509,6 +1509,10 @@ function detalheHtml(o,midias){
   if(o.aprovado!==false)passos.push(
     {k:'servIni',l:'Serviço iniciado',quem:o.tecnico,dur:d.esperaServ,durL:'espera'},
     {k:'servFim',l:'Serviço finalizado',quem:o.tecnico,dur:d.execucao,durL:'execução'});
+  if(o.desistencia){
+    if(t.servIni)passos.push({k:'servIni',l:'Serviço iniciado',quem:o.tecnico});
+    passos.push({k:'desistiu',l:'Cliente voltou atrás — não aprovado',quem:o.desistencia.por+(o.desistencia.motivo?' · '+o.desistencia.motivo:'')});
+  }
   passos.push({k:'entregue',l:'Entregue ao cliente',dur:d.retirada,durL:'aguardando retirada'});
   var proximo=true;
   h+='<div class="card"><h3>Linha do tempo</h3><div class="tl">'+passos.map(function(p){
@@ -1591,8 +1595,12 @@ function acoesHtml(o){
   var id=o.id,b='';
   if(ehExterno())return'<div class="info" style="margin-bottom:12px;">Situação: <b>'+esc(rotuloEtapa(o.etapa))+'</b>.'
     +(o.etapa==='em_transito'?'<br>Entregue o aparelho no comercial da loja.':'')+'</div>';
+  /* Aprovado ou em serviço: o cliente pode voltar atrás. Os dois setores podem
+     registrar (o comercial costuma saber primeiro). */
+  var voltar=(o.etapa==='aprovado'||o.etapa==='em_servico')?'<button class="btn btn-sm btn-del" style="margin-top:8px;" onclick="clienteDesistiu(\''+id+'\')">↩ Cliente voltou atrás — não aprova</button>':'';
   if(doOutro(o.etapa))return'<div class="info" style="margin-bottom:12px;">Esta OS está com '+(DONO[o.etapa]==='comercial'?'o comercial':'a manutenção')
-    +': <b>'+esc(rotuloEtapa(o.etapa))+'</b>.<br>As ações desta etapa são feitas na tela '+(DONO[o.etapa]==='comercial'?'do Comercial':'da Manutenção')+'.</div>';
+    +': <b>'+esc(rotuloEtapa(o.etapa))+'</b>.<br>As ações desta etapa são feitas na tela '+(DONO[o.etapa]==='comercial'?'do Comercial':'da Manutenção')+'.'
+    +(voltar?'<div>'+voltar+'</div>':'')+'</div>';
   switch(o.etapa){
     case'em_transito':b='<div class="info">Retirado na casa do cliente por <b>'+esc(o.tecnicoExterno||'-')+'</b> em '+fmtDH(o.tempos.retirado)+'.<br>Receba o aparelho do técnico, cole a etiqueta da OS e leve para a manutenção.</div>'
       +'<button class="btn btn-p btn-lg" onclick="receberDoTecnico(\''+id+'\')">📥 Recebi do técnico</button>';break;
@@ -1607,8 +1615,8 @@ function acoesHtml(o){
       +(o.tempos.informado?'':'<button class="btn btn-p btn-lg" style="margin-bottom:8px;" onclick="clienteInformado(\''+id+'\')">📞 Orçamento passado ao cliente</button>')
       +'<div class="actions"><button class="btn btn-ok" onclick="respostaCliente(\''+id+'\',true)">✔ Cliente aprovou</button>'
       +'<button class="btn btn-no" onclick="respostaCliente(\''+id+'\',false)">✖ Cliente não aprovou</button></div>';break;
-    case'aprovado':b='<button class="btn btn-p btn-lg" onclick="iniciarServ(\''+id+'\')">🛠 Iniciar serviço</button>';break;
-    case'em_servico':b='<button class="btn btn-p btn-lg" onclick="finalizarServ(\''+id+'\')">✅ Finalizar serviço</button>';break;
+    case'aprovado':b='<button class="btn btn-p btn-lg" onclick="iniciarServ(\''+id+'\')">🛠 Iniciar serviço</button>'+voltar;break;
+    case'em_servico':b='<button class="btn btn-p btn-lg" onclick="finalizarServ(\''+id+'\')">✅ Finalizar serviço</button>'+voltar;break;
     case'pronto':case'devolver':b='<div class="info">'+contaCliente(o)+'</div><button class="btn btn-ok btn-lg" onclick="entregar(\''+id+'\')">📦 Entregar ao cliente</button>';break;
   }
   return b?'<div style="margin-bottom:12px;">'+b+'</div>':'';
@@ -1925,6 +1933,25 @@ function respostaCliente(id,aprovou){
         aprovou?'Aprovado — vai para a fila da oficina':'Registrado — devolver ao cliente');
     });
 }
+/* Cliente aprovou e depois desistiu: a OS volta como "não aprovado" e vai para
+   o comercial devolver o aparelho. A aprovação original fica registrada. */
+function clienteDesistiu(id){
+  var o=getOS(id);if(!o)return;
+  passoSimples('Cliente voltou atrás',
+    '<div class="info">A OS passa para <b>"Devolver sem conserto"</b> e vai para o comercial devolver o aparelho. A avaliação'+(avalPaga(o)?' já paga fica como valor cobrado.':' deve ser cobrada na devolução.')
+    +(o.etapa==='em_servico'?'<br><b>O serviço já tinha começado</b>: confira se o aparelho precisa ser remontado antes de devolver.':'')+'</div>'
+    +'<div class="field"><label>Quem está registrando <span class="req">*</span></label><input id="ps-quem" list="vendedores" value="'+esc(ehComercial()?(lerLocal('comercial')||lerLocal('atendente')):lerLocal('tecnico'))+'"/></div>'
+    +'<div class="field"><label>Motivo <span class="req">*</span></label><textarea id="ps-obs" rows="2" placeholder="Ex: achou caro, vai comprar um novo"></textarea></div>',
+    'Confirmar: não aprovado',async function(){
+      var q=val('ps-quem'),m=val('ps-obs');
+      if(!q){psErro('Informe quem está registrando.');return false;}
+      if(!m){psErro('Escreva o motivo.');return false;}
+      var agora=Date.now();
+      await avancar(id,{etapa:'devolver',aprovado:false,'tempos.desistiu':agora,
+        desistencia:{em:agora,por:q,motivo:m,etapaAnterior:o.etapa,aprovadoEm:o.tempos.resposta||null},
+        obsResposta:(o.obsResposta?o.obsResposta+' · ':'')+'Voltou atrás: '+m},'Registrado — devolver o aparelho ao cliente');
+    });
+}
 function iniciarServ(id){
   var o=getOS(id);
   passoSimples('Iniciar serviço',tecnicoSelect('ps-tec',o.tecnicoOrc),'Iniciar agora',async function(){
@@ -1997,8 +2024,8 @@ function apagarOS(id){
     });
   $('ps-ok').className='btn btn-no';
 }
-var NOMES_T={retirado:'Retirada na casa do cliente',recebido:'Entrada na loja',orcIni:'Início do orçamento',orcFim:'Fim do orçamento',precificado:'Preço do comercial',informado:'Orçamento enviado ao cliente',resposta:'Resposta do cliente',servIni:'Início do serviço',servFim:'Fim do serviço',entregue:'Entrega'};
-var ORDEM_T=['retirado','recebido','orcIni','orcFim','precificado','informado','resposta','servIni','servFim','entregue'];
+var NOMES_T={desistiu:'Cliente voltou atrás',retirado:'Retirada na casa do cliente',recebido:'Entrada na loja',orcIni:'Início do orçamento',orcFim:'Fim do orçamento',precificado:'Preço do comercial',informado:'Orçamento enviado ao cliente',resposta:'Resposta do cliente',servIni:'Início do serviço',servFim:'Fim do serviço',entregue:'Entrega'};
+var ORDEM_T=['retirado','recebido','orcIni','orcFim','precificado','informado','resposta','servIni','desistiu','servFim','entregue'];
 function ajustarHora(id,k){
   var o=getOS(id);
   passoSimples('Ajustar horário','<div class="field"><label>'+esc(NOMES_T[k])+'</label><input type="datetime-local" id="ps-dh" value="'+toLocalInput(o.tempos[k])+'"/></div>'
