@@ -181,16 +181,19 @@ var FB_CFG={
 };
 var API='https://whatsapp-crm-production-66bf.up.railway.app';
 var C_ROTA='campo_rotas',C_ATR='campo_atribuicoes',C_LOC='campo_localizacoes',C_REG='campo_pedidos',C_MID='campo_midias',C_TEC='campo_tecnicos';
-var MAX_FOTOS=8;
+var MAX_FOTOS=4; /* por grupo */
+/* Fotos do aparelho antes e depois do serviço, obrigatórias (ao menos uma de cada). */
+var GRUPOS_FOTO=[{k:'antes',l:'Antes'},{k:'depois',l:'Depois'}];
+function fotosDe(g){return S.midias.filter(function(m){return(m.grupo||'depois')===g;});}
 /* Perguntas obrigatórias do atendimento: respondidas antes da assinatura e
    impressas no PDF. A observação de cada uma é opcional. */
 var CHECK=[
   {k:'higienizacao',p:'O aparelho precisa de higienização?',o:['Sim','Não','Feita neste atendimento'],obs:'Observação (opcional)'},
-  {k:'pressao',p:'Qual a pressão do local?',o:['Baixa','Normal','Alta','Não foi possível medir'],obs:'Valor medido ou observação (opcional)'},
+  {k:'pressao',p:'Qual a pressão do local?',valor:'kgf/cm²'},
   {k:'mangueiras',p:'As mangueiras estão ressecadas ou foram trocadas há mais de um ano?',o:['Sim','Não','Trocadas neste atendimento','Não verificado'],obs:'Observação (opcional)'}
 ];
 /* Pagamento na entrega: obrigatório dizer se foi feito e, se sim, a forma. */
-var FORMAS_PAG=['Pix','Dinheiro','Cartão de crédito','Cartão de débito','Boleto','Outro'];
+var FORMAS_PAG=['Pix','Crédito','Débito'],PARCELAS=['À vista','2x','3x','4x','5x','6x','7x','8x','9x','10x','11x','12x'];
 var TERMO='Declaro que recebi nesta data os produtos e/ou serviços descritos neste pedido, nas condições registradas acima.';
 
 /* ═══ Estado ═════════════════════════════════════════════════════════════ */
@@ -793,15 +796,15 @@ function renderPedido(){
   /* Registro do atendimento */
   var assinado=!!r.assinatura,trava=assinado?' disabled':'';
   h+='<div class="card"><div class="sec">Registro do atendimento</div>'
-    +'<div class="field"><label>Fotos ('+S.midias.length+'/'+MAX_FOTOS+')</label><div class="photos">'
-    +S.midias.map(function(m){return'<div class="ph-t"><img src="'+m.data+'"/>'+(assinado?'':'<button class="x" onclick="rmFoto(\''+m.id+'\')">✕</button>')+'</div>';}).join('')
-    +'</div>'+(assinado?'':'<div class="addbar"><button class="btn btn-g" onclick="addFoto(true)">📷 Tirar foto</button><button class="btn btn-g" onclick="addFoto(false)">🖼 Galeria</button></div>')
-    +'<div class="sub" id="foto-st"></div></div>'
+    +GRUPOS_FOTO.map(function(g){var fs=fotosDe(g.k);
+      return'<div class="field" id="fotos-'+g.k+'"><label>Foto do aparelho '+g.l.toLowerCase()+' do serviço <span class="req">*</span> <span class="sub">('+fs.length+'/'+MAX_FOTOS+')</span></label><div class="photos">'
+        +fs.map(function(m){return'<div class="ph-t"><img src="'+m.data+'"/>'+(assinado?'':'<button class="x" onclick="rmFoto(\''+m.id+'\')">✕</button>')+'</div>';}).join('')
+        +'</div>'+(assinado?'':'<div class="addbar"><button class="btn btn-g" onclick="addFoto(true,\''+g.k+'\')">📷 Tirar foto</button><button class="btn btn-g" onclick="addFoto(false,\''+g.k+'\')">🖼 Galeria</button></div>')
+        +'<div class="sub" id="foto-st-'+g.k+'"></div></div>';}).join('')
     +checkHtml(r.checklist||{},assinado)
     +pagHtml(r.pagamento||{},assinado)
-    +'<div class="field"><label>Observações do técnico</label><textarea id="obs" rows="4" placeholder="O que foi entregue/instalado, pendências…"'+trava+' onchange="salvarCampos()">'+esc(r.obs||'')+'</textarea></div>'
-    +'<div class="g2"><div class="field"><label>Quem recebeu / assinou <span class="req">*</span></label><input id="rec-nome" value="'+esc(r.recebedor?r.recebedor.nome:(c.nome||''))+'"'+trava+' onchange="salvarCampos()"/></div>'
-    +'<div class="field"><label>Documento (CPF ou RG)</label><input id="rec-doc" inputmode="numeric" value="'+esc(r.recebedor?r.recebedor.doc:'')+'"'+trava+' onchange="salvarCampos()"/></div></div>'
+    +'<div class="field"><label>Observações do técnico <span class="req">*</span></label><textarea id="obs" rows="4" placeholder="O que foi feito, peças trocadas, pendências…"'+trava+' onchange="salvarCampos()">'+esc(r.obs||'')+'</textarea></div>'
+    +'<div class="field"><label>Quem recebeu / assinou <span class="req">*</span></label><input id="rec-nome" value="'+esc(r.recebedor?r.recebedor.nome:(c.nome||''))+'"'+trava+' onchange="salvarCampos()"/></div>'
     +'</div>';
 
   /* Assinatura e envio */
@@ -829,6 +832,9 @@ function renderPedido(){
 function checkHtml(ck,trava){
   return CHECK.map(function(q,i){
     var a=ck[q.k]||{};
+    /* Pergunta de valor (a pressão): só o número, obrigatório. */
+    if(q.valor)return'<div class="field" id="ck-'+q.k+'"><label>'+(i+1)+'. '+esc(q.p)+' <span class="req">*</span></label>'
+      +'<div style="display:flex;align-items:center;gap:8px;"><input id="ck-'+q.k+'-v" type="text" inputmode="decimal" placeholder="Ex.: 3,5" style="max-width:140px;" value="'+esc(String(a.r||'').replace(' '+q.valor,''))+'"'+(trava?' disabled':'')+' onchange="salvarCampos()"/><span class="sub">'+esc(q.valor)+'</span></div></div>';
     return'<div class="field" id="ck-'+q.k+'"><label>'+(i+1)+'. '+esc(q.p)+' <span class="req">*</span></label><div class="opts">'
       +q.o.map(function(op){return'<button type="button" class="chip'+(a.r===op?' on':'')+'"'+(trava?' disabled':'')+' data-v="'+esc(op)+'" onclick="ckSel(\''+q.k+'\',this)">'+esc(op)+'</button>';}).join('')
       +'</div><input id="ck-'+q.k+'-obs" placeholder="'+esc(q.obs)+'" style="margin-top:6px;font-size:14px;" value="'+esc(a.obs||'')+'"'+(trava?' disabled':'')+' onchange="salvarCampos()"/></div>';
@@ -837,24 +843,33 @@ function checkHtml(ck,trava){
 function pagHtml(pg,trava){
   var dis=trava?' disabled':'';
   function chips(id,ops,atual){return'<div class="opts" id="'+id+'">'+ops.map(function(op){return'<button type="button" class="chip'+(atual===op?' on':'')+'"'+dis+' data-v="'+esc(op)+'" onclick="pagSel(this)">'+esc(op)+'</button>';}).join('')+'</div>';}
-  return'<div class="field" id="pag"><label>Pagamento: foi feito na entrega? <span class="req">*</span></label>'+chips('pag-feito',['Sim','Não'],pg.feito)
-    +'<div id="pag-sim" style="margin-top:10px;'+(pg.feito==='Sim'?'':'display:none')+'"><label>Como foi pago? <span class="req">*</span></label>'+chips('pag-forma',FORMAS_PAG,pg.forma)+'</div>'
-    +'<input id="pag-obs" placeholder="'+(pg.feito==='Não'?'Como ficou combinado? (opcional)':'Valor recebido, parcelas ou observação (opcional)')+'" style="margin-top:6px;font-size:14px;" value="'+esc(pg.obs||'')+'"'+dis+' onchange="salvarCampos()"/></div>';
+  return'<div class="field" id="pag"><label>Pagamento feito no local? <span class="req">*</span></label>'+chips('pag-feito',['Sim','Não'],pg.feito)
+    +'<div id="pag-sim" style="margin-top:10px;'+(pg.feito==='Sim'?'':'display:none')+'"><label>Forma de pagamento <span class="req">*</span></label>'+chips('pag-forma',FORMAS_PAG,pg.forma)
+    +'<div id="pag-cred" style="margin-top:10px;'+(pg.feito==='Sim'&&pg.forma==='Crédito'?'':'display:none')+'"><label>Crédito: à vista ou em quantas vezes? <span class="req">*</span></label>'+chips('pag-parc',PARCELAS,pg.parcelas)+'</div></div>'
+    +'<div id="pag-nao" style="margin-top:10px;'+(pg.feito==='Não'?'':'display:none')+'"><label>Como ficou combinado? <span class="req">*</span></label>'
+    +'<input id="pag-obs" placeholder="Ex.: boleto para 30 dias, pagamento na loja…" style="font-size:14px;" value="'+esc(pg.obs||'')+'"'+dis+' onchange="salvarCampos()"/></div></div>';
 }
 function pagSel(btn){
   Array.prototype.forEach.call(btn.parentNode.children,function(b){b.classList.toggle('on',b===btn);});
-  if(btn.parentNode.id==='pag-feito'){
-    var sim=btn.getAttribute('data-v')==='Sim';
-    $('pag-sim').style.display=sim?'':'none';
-    $('pag-obs').placeholder=sim?'Valor recebido, parcelas ou observação (opcional)':'Como ficou combinado? (opcional)';
-  }
+  var pg=pagLer();
+  $('pag-sim').style.display=pg.feito==='Sim'?'':'none';
+  $('pag-nao').style.display=pg.feito==='Não'?'':'none';
+  $('pag-cred').style.display=pg.feito==='Sim'&&pg.forma==='Crédito'?'':'none';
   salvarCampos();
 }
 function pagLer(){
   if(!$('pag'))return null;
-  var f=$('pag-feito').querySelector('.chip.on'),m=$('pag-forma').querySelector('.chip.on');
-  var feito=f?f.getAttribute('data-v'):'';
-  return{feito:feito,forma:feito==='Sim'&&m?m.getAttribute('data-v'):'',obs:val('pag-obs')};
+  var on=function(id){var b=$(id).querySelector('.chip.on');return b?b.getAttribute('data-v'):'';};
+  var feito=on('pag-feito'),forma=feito==='Sim'?on('pag-forma'):'';
+  return{feito:feito,forma:forma,parcelas:forma==='Crédito'?on('pag-parc'):'',obs:feito==='Não'?val('pag-obs'):''};
+}
+/* O que falta preencher no pagamento ('' = completo). */
+function pagFalta(pg){
+  if(!pg.feito)return'Informe se o pagamento foi feito no local';
+  if(pg.feito==='Sim'&&!pg.forma)return'Informe a forma de pagamento';
+  if(pg.forma==='Crédito'&&!pg.parcelas)return'Informe se o crédito foi à vista ou em quantas vezes';
+  if(pg.feito==='Não'&&!pg.obs)return'Escreva como ficou combinado o pagamento';
+  return'';
 }
 function ckSel(k,btn){
   Array.prototype.forEach.call(btn.parentNode.children,function(b){b.classList.toggle('on',b===btn);});
@@ -865,6 +880,7 @@ function ckLer(){
   var ck={};
   CHECK.forEach(function(q){
     var box=$('ck-'+q.k);if(!box)return;
+    if(q.valor){var v=val('ck-'+q.k+'-v').replace('.',',');ck[q.k]={p:q.p,r:/\d/.test(v)?v+' '+q.valor:'',obs:''};return;}
     var on=box.querySelector('.chip.on');
     ck[q.k]={p:q.p,r:on?on.getAttribute('data-v'):'',obs:val('ck-'+q.k+'-obs')};
   });
@@ -894,7 +910,7 @@ function salvarCampos(extra){
   if($('obs'))r.obs=val('obs');
   if($('ck-'+CHECK[0].k))r.checklist=ckLer();
   if($('pag'))r.pagamento=pagLer();
-  if($('rec-nome'))r.recebedor={nome:val('rec-nome'),doc:val('rec-doc')};
+  if($('rec-nome'))r.recebedor={nome:val('rec-nome')};
   if(extra)for(var k in extra)r[k]=extra[k];
   var id=String(S.ped.id);
   S.reg[id]=Object.assign({},S.reg[id]||{},r);
@@ -923,18 +939,18 @@ function compressImg(file){
     r.readAsDataURL(file);
   });
 }
-function addFoto(camera){
-  if(S.midias.length>=MAX_FOTOS){toast('Máximo de '+MAX_FOTOS+' fotos');return;}
+function addFoto(camera,grupo){
+  if(fotosDe(grupo).length>=MAX_FOTOS){toast('Máximo de '+MAX_FOTOS+' fotos');return;}
   var inp=document.createElement('input');inp.type='file';inp.accept='image/*';
   if(camera)inp.capture='environment';else inp.multiple=true;
   inp.onchange=async function(e){
     var files=Array.prototype.slice.call(e.target.files||[]),pedidoId=String(S.ped.id);
-    var st=$('foto-st');
-    for(var i=0;i<files.length&&S.midias.length<MAX_FOTOS;i++){
+    var st=$('foto-st-'+grupo);
+    for(var i=0;i<files.length&&fotosDe(grupo).length<MAX_FOTOS;i++){
       if(st)st.textContent='Salvando foto…';
       try{
         var f=await compressImg(files[i]);
-        var m={pedidoId:pedidoId,data:f.data,w:f.w,h:f.h,criadoEm:Date.now(),tecnico:S.tecnico};
+        var m={pedidoId:pedidoId,grupo:grupo,data:f.data,w:f.w,h:f.h,criadoEm:Date.now(),tecnico:S.tecnico};
         var ref=db.collection(C_MID).doc();
         ref.set(m).catch(function(err){toast('Foto não salva: '+err.message);});
         m.id=ref.id;S.midias.push(m);
@@ -962,11 +978,11 @@ function assinar(){
     toast(falta.length===1?'Responda a pergunta '+(CHECK.indexOf(falta[0])+1)+' antes da assinatura':'Responda as perguntas '+falta.map(function(q){return CHECK.indexOf(q)+1;}).join(', ')+' antes da assinatura');
     $('ck-'+falta[0].k).scrollIntoView({behavior:'smooth',block:'center'});return;
   }
-  var pg=pagLer();
-  if(pg&&(!pg.feito||(pg.feito==='Sim'&&!pg.forma))){
-    toast(!pg.feito?'Informe se o pagamento foi feito':'Informe como o pagamento foi feito');
-    $('pag').scrollIntoView({behavior:'smooth',block:'center'});return;
-  }
+  var pg=pagLer(),fp=pg&&pagFalta(pg);
+  if(fp){toast(fp);$('pag').scrollIntoView({behavior:'smooth',block:'center'});return;}
+  if(!val('obs')){toast('Escreva as observações do técnico');$('obs').scrollIntoView({behavior:'smooth',block:'center'});$('obs').focus();return;}
+  var semFoto=GRUPOS_FOTO.filter(function(g){return!fotosDe(g.k).length;});
+  if(semFoto.length){toast('Tire ao menos uma foto do aparelho '+semFoto.map(function(g){return g.l.toLowerCase();}).join(' e '));$('fotos-'+semFoto[0].k).scrollIntoView({behavior:'smooth',block:'center'});return;}
   var nome=val('rec-nome');
   if(!nome){toast('Preencha quem está recebendo/assinando');$('rec-nome').focus();return;}
   salvarCampos();
@@ -1200,13 +1216,14 @@ async function montarPdf(){
   var pg=r.pagamento;
   if(pg&&pg.feito){
     section('Pagamento');
-    line('Pago na entrega',pg.feito==='Sim'?'Sim — '+(pg.forma||'-'):'Não');
-    line(pg.feito==='Sim'?'Observação':'Combinado',pg.obs);
+    line('Pago no local',pg.feito==='Sim'?'Sim — '+(pg.forma||'-')+(pg.forma==='Crédito'&&pg.parcelas?(pg.parcelas==='À vista'?' à vista':' em '+pg.parcelas):''):'Não');
+    if(pg.feito==='Não')line('Combinado',pg.obs);
   }
   if(r.obs){section('Observações do técnico');texto(r.obs);}
-  var fotos=S.midias.filter(function(m){return m.data;});
+  GRUPOS_FOTO.forEach(function(g){
+  var fotos=fotosDe(g.k).filter(function(m){return m.data;});
   if(fotos.length){
-    section('Fotos do atendimento');
+    section('Fotos do aparelho — '+g.l.toLowerCase()+' do serviço');
     var W=58,H=44,G=4;
     for(var i=0;i<fotos.length;i++){
       var col=i%3;
@@ -1218,6 +1235,7 @@ async function montarPdf(){
     }
     y+=H+4;
   }
+  });
   section('Declaração do cliente');
   texto(a.termo||TERMO);
   /* Assinatura do cliente e identificação do técnico */
@@ -1232,7 +1250,7 @@ async function montarPdf(){
   var rec=r.recebedor||{};
   doc.text(rec.nome||c.nome||'Cliente',cx1,base+5,{align:'center'});doc.text(S.tecnico,cx2,base+5,{align:'center'});
   doc.setFont('helvetica','normal');doc.setFontSize(6.5);doc.setTextColor(140,140,140);
-  doc.text(rec.doc?'Documento: '+rec.doc:'Recebedor',cx1,base+9,{align:'center'});
+  doc.text('Recebedor',cx1,base+9,{align:'center'});
   doc.text('Técnico · '+PURIFIC.nome,cx2,base+9,{align:'center'});
   y+=44;
   /* Registro da assinatura: o comprovante de quando e onde foi assinada. */
