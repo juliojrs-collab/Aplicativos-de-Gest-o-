@@ -48,6 +48,8 @@ body.largo main{max-width:none;}
 .kb-c{background:#fff;border-radius:8px;box-shadow:var(--sh);padding:8px 10px;cursor:grab;font-size:13px;border:2px solid transparent;}
 .kb-c.sel{border-color:var(--blue);box-shadow:var(--sh2);}
 .kb-c .t{font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.kb-c .tp{margin-top:6px;padding-top:6px;gap:4px;}
+.kb-c .tp .chip{padding:3px 7px;font-size:11px;}
 .kb-c .its-l{font-size:12px;margin-top:2px;}
 .kb-c .x{font-size:11px;color:var(--text2);display:flex;justify-content:space-between;gap:6px;margin-top:4px;}
 .kb-c .x a{color:var(--blue);}
@@ -353,13 +355,37 @@ function atribuir(ev,id,i){
 function atribuirNome(id,nome){
   var k=String(id);
   if(tecDe(id)===nome)return;
-  if(!nome){delete S.atr[k];db.collection(C_ATR).doc(k).delete().catch(function(e){toast('Erro: '+e.message);});}
-  else{
-    var o=(S.lista||[]).filter(function(x){return String(x.id)===k;})[0]||{};
-    var d={tecnico:nome,por:S.tecnico,em:Date.now(),numero:o.numero||'',dataPrevista:o.dataPrevista||''};
-    S.atr[k]=d;db.collection(C_ATR).doc(k).set(d).catch(function(e){toast('Erro: '+e.message);});
-  }
+  /* merge: o tempo de serviço marcado no pedido fica, mesmo trocando o técnico. */
+  var o=(S.lista||[]).filter(function(x){return String(x.id)===k;})[0]||{};
+  var d={tecnico:nome||'',por:S.tecnico,em:Date.now(),numero:o.numero||'',dataPrevista:o.dataPrevista||''};
+  S.atr[k]=Object.assign({},S.atr[k]||{},d);
+  db.collection(C_ATR).doc(k).set(d,{merge:true}).catch(function(e){toast('Erro: '+e.message);});
   desenharItens();
+}
+/* Tempo de serviço estimado do pedido (minutos), marcado pelo comercial. */
+var TEMPOS=[15,30,45,60];
+function tempoDe(id){var a=S.atr[String(id)];return a&&a.tempo||0;}
+function fmtTempo(m){return m>=60?(Math.floor(m/60)+'h'+(m%60?pad(m%60):'')):m+' min';}
+function definirTempo(ev,id,m){
+  ev.stopPropagation();
+  if(m==='outro'){
+    var r=prompt('Tempo estimado do serviço, em minutos (ex.: 90):',tempoDe(id)||'');
+    if(r==null)return;m=parseInt(r,10);
+    if(!(m>0&&m<=480)){toast('Informe um tempo entre 1 e 480 minutos');return;}
+  }
+  if(tempoDe(id)===m)m=0; /* segundo toque desmarca */
+  var k=String(id),o=(S.lista||[]).filter(function(x){return String(x.id)===k;})[0]||{};
+  S.atr[k]=Object.assign({},S.atr[k]||{},{tempo:m});
+  db.collection(C_ATR).doc(k).set({tempo:m,numero:o.numero||'',dataPrevista:o.dataPrevista||'',em:(S.atr[k].em||Date.now())},{merge:true}).catch(function(e){toast('Erro: '+e.message);});
+  desenharItens();
+}
+function tempoHtml(o){
+  var t=tempoDe(o.id);
+  if(ehTec())return t?'<div class="badges"><span class="badge b-gray">⏱ serviço ~'+fmtTempo(t)+'</span></div>':'';
+  var outro=t&&TEMPOS.indexOf(t)<0;
+  return'<div class="atr tp" onclick="event.stopPropagation()"><span>⏱ Tempo</span>'
+    +TEMPOS.map(function(m){return'<button class="chip'+(t===m?' on':'')+'" onclick="definirTempo(event,'+o.id+','+m+')">'+fmtTempo(m)+'</button>';}).join('')
+    +'<button class="chip'+(outro?' on':'')+'" onclick="definirTempo(event,'+o.id+',\'outro\')">'+(outro?fmtTempo(t):'Outro')+'</button></div>';
 }
 function atrHtml(o){
   var t=tecDe(o.id);
@@ -462,6 +488,7 @@ function desenharItens(){
       +'<div class="s">'+(o.total?money(o.total):'')+((busca||S.filtro==='feitas')&&d?' · entrega '+fmtData(d):'')+'</div>'
       +(o.vendedor?'<div class="vend">Vendedor: <b>'+esc(o.vendedor)+'</b></div>':'')
       +itensResumo(o)
+      +tempoHtml(o)
       +'<div class="badges">'+(o._em?'<span class="badge b-gray">'+fmtDH(o._em)+'</span>':'')+statusReg(o.id)+'</div>'
       +atrHtml(o)+'</div></div>';
   }).join('');
@@ -475,6 +502,7 @@ function kbCard(o){
   return'<div class="kb-c'+(S.kbSel===o.id?' sel':'')+'" draggable="true" data-id="'+o.id+'" ondragstart="kbDrag(event,'+o.id+')" onclick="kbClique(event,'+o.id+')">'
     +'<div class="t">'+(o._rota?'<span class="ord" style="font-size:11px;">'+o._rota.n+'º '+esc(o._rota.h)+'</span> ':'')+esc(o.numero)+' · '+esc(o.cliente||'Cliente')+'</div>'
     +itensResumo(o)
+    +tempoHtml(o)
     +'<div class="x"><span>'+(o.vendedor?esc(o.vendedor):'')+(o.total?' · '+money(o.total):'')+'</span><a href="#" onclick="event.stopPropagation();event.preventDefault();abrirPedido('+o.id+')">abrir</a></div>'
     +'<div class="badges">'+statusReg(o.id)+'</div></div>';
 }
@@ -548,7 +576,7 @@ function rotaPainel(tec,dia,lista){
   }else{
     h+='<div class="sec" style="margin:0 0 8px;">🗺️ Rota de '+esc(tec)+' · '+esc(rotuloDia(dia))+'</div>'
       +'<div class="g2"><div class="field"><label>Saída da loja</label><input type="time" id="rp-saida" value="'+esc(ROTA_CFG.saida)+'"/></div>'
-      +'<div class="field"><label>Tempo em cada cliente (min)</label><input type="number" id="rp-parada" min="0" max="180" value="'+ROTA_CFG.parada+'"/></div></div>'
+      +'<div class="field"><label>Tempo padrão por cliente (min)</label><input type="number" id="rp-parada" min="0" max="180" value="'+ROTA_CFG.parada+'"/></div></div>'
       +'<button class="btn btn-p btn-lg" id="rp-btn" onclick="montarRota()">🗺️ Montar a melhor rota ('+lista.length+' entrega'+(lista.length===1?'':'s')+')</button>'
       +'<div class="sub" style="margin-top:6px;">Sai da loja, passa por todos os endereços na melhor ordem e volta. Horários escritos nas observações do pedido (ex.: "só à tarde") são respeitados.</div>';
   }
@@ -557,7 +585,8 @@ function rotaPainel(tec,dia,lista){
 function idsDoTecnico(dia,tec){return(S.lista||[]).filter(function(o){return prev(o)===dia&&tecDe(o.id)===tec;}).map(function(o){return o.id;});}
 async function calcularRota(dia,tec,ids,saida,parada,manual){
   var res=await api('/api/bling/campo/rota',{method:'POST',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({pedidos:ids,dia:dia,saida:saida,parada:parada,manterOrdem:!!manual})});
+    body:JSON.stringify({pedidos:ids,dia:dia,saida:saida,parada:parada,manterOrdem:!!manual,
+      tempos:ids.reduce(function(m,id){var t=tempoDe(id);if(t)m[id]=t;return m;},{})})});
   var doc={dia:dia,tecnico:tec,por:S.tecnico,em:Date.now(),resultado:res};
   S.rotas[rotaId(dia,tec)]=doc;
   db.collection(C_ROTA).doc(rotaId(dia,tec)).set(doc).catch(function(e){toast('Rota não salva: '+e.message);});
@@ -573,7 +602,7 @@ function painelTodas(dia,doDia){
       return'<div style="margin-bottom:4px;font-size:13px;">👷 <b>'+esc(t)+'</b> · '+tecs[t]+' entrega'+(tecs[t]===1?'':'s')+' · '
         +(res?'✅ rota montada ('+String(res.distanciaKm).replace('.',',')+' km, volta '+esc(res.volta)+')':'<span style="color:var(--amber)">sem rota</span>')+'</div>';}).join('')
     +'<div class="g2" style="margin-top:8px;"><div class="field"><label>Saída da loja</label><input type="time" id="rt-saida" value="'+esc(ROTA_CFG.saida)+'"/></div>'
-    +'<div class="field"><label>Tempo em cada cliente (min)</label><input type="number" id="rt-parada" min="0" max="180" value="'+ROTA_CFG.parada+'"/></div></div>'
+    +'<div class="field"><label>Tempo padrão por cliente (min)</label><input type="number" id="rt-parada" min="0" max="180" value="'+ROTA_CFG.parada+'"/></div></div>'
     +'<button class="btn btn-p btn-lg" id="rt-btn" onclick="montarTodas('+(faltam.length?'false':'true')+')">'+(faltam.length?'🗺️ Montar as rotas que faltam ('+faltam.length+')':'↻ Montar todas de novo ('+nomes.length+')')+'</button>'
     +'<div class="sub" style="margin-top:6px;">Cada técnico recebe a sua rota, saindo da loja e voltando. Entregas sem técnico marcado ficam de fora.</div></div>';
 }
@@ -651,7 +680,7 @@ function renderRota(){
       +'<div class="n"'+(p.atrasado?' style="background:var(--red)"':'')+'>'+(i+1)+'</div>'
       +'<div class="m"><div><b>'+esc(p.cliente||'Cliente')+'</b> <span class="sub">· pedido '+esc(p.numero)+'</span></div>'
       +'<div class="sub">'+esc(p.endereco||'')+'</div>'
-      +(r.alterada?'':'<div style="font-size:13px;margin-top:2px;">Chegada prevista <b>'+esc(p.chegada)+'</b>'+(p.espera>=10?' <span class="sub">(espera '+p.espera+' min pelo horário do cliente)</span>':'')+'</div>')
+      +(r.alterada?'':'<div style="font-size:13px;margin-top:2px;">Chegada prevista <b>'+esc(p.chegada)+'</b>'+(p.tempo?' <span class="sub">· serviço ~'+fmtTempo(p.tempo)+'</span>':'')+(p.espera>=10?' <span class="sub">(espera '+p.espera+' min pelo horário do cliente)</span>':'')+'</div>')
       +(jan?'<div class="badges"><span class="badge '+(p.atrasado?'b-red':'b-amber')+'">🕒 '+esc(jan)+(p.atrasado?' · não dá para cumprir':'')+'</span></div>':'')
       +(p.aproximado?'<div class="badges"><span class="badge b-red">📍 Endereço localizado só de forma aproximada — confira</span></div>':'')
       +'<div class="actions" style="margin-top:6px;"><a class="btn btn-g btn-sm" style="text-decoration:none;" target="_blank" rel="noopener" href="'+navUrl(p)+'">🧭 Navegar</a>'
