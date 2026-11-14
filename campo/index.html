@@ -175,7 +175,7 @@ var TERMO='Declaro que recebi nesta data os produtos e/ou serviços descritos ne
 /* ═══ Estado ═════════════════════════════════════════════════════════════ */
 var db=null,FB_ERR='';
 var S={
-  tela:'lista',tecnico:lsGet('campo_tecnico')||'',tecs:[],
+  tela:'lista',tecnico:lsGet('campo_tecnico')||'',perfil:lsGet('campo_perfil')||'',tecs:[],
   tecsRua:[],
   lista:null,listaErr:'',carregando:false,filtro:'hoje',hoje:'',busca:'',
   reg:{},              /* campo_pedidos por id do pedido no Bling */
@@ -246,28 +246,47 @@ async function api(caminho,opts){
 /* ═══ Telas ══════════════════════════════════════════════════════════════ */
 function render(){
   if(FB_ERR){$('top').innerHTML='<h1>🚚 Entregas</h1>';$('app').innerHTML='<div class="err">'+esc(FB_ERR)+'</div>';return;}
-  if(!S.tecnico||S.tela==='quem')return renderQuem();
+  if(!S.tecnico||!S.perfil||S.tela==='quem')return renderQuem();
   if(S.tela==='ped')return renderPedido();
   if(S.tela==='rota')return renderRota();
   renderLista();
 }
 
-/* Primeiro acesso no aparelho: o técnico escolhe o nome dele. */
+/* Dois acessos ao mesmo app:
+   - técnico: só as entregas marcadas para ele, a rota dele, preencher e assinar;
+   - comercial: todas as entregas, define o técnico de cada uma e monta as rotas. */
+function ehTec(){return S.perfil==='tecnico';}
+function whoBtn(){return'<button class="who" onclick="S.tela=\'quem\';S._qp=\'\';render()">'+(ehTec()?'👷 ':'💼 ')+esc(S.tecnico)+'</button>';}
 function renderQuem(){
   $('top').innerHTML='<h1>🚚 Entregas</h1>';
-  var h='<div class="card"><h3>Quem está usando este celular?</h3>'
-    +'<div class="sub" style="margin-bottom:12px;">O seu nome sai no pedido assinado que o cliente recebe.</div>';
-  if(S.tecs.length)h+='<div class="chips" style="flex-wrap:wrap;">'+S.tecs.map(function(n,i){return'<button class="chip'+(n===S.tecnico?' on':'')+'" onclick="escolherTec('+i+')">'+esc(n)+'</button>';}).join('')+'</div>';
-  h+='<div class="field"><label>'+(S.tecs.length?'Não está na lista? Digite seu nome':'Seu nome')+'</label><input id="q-nome" placeholder="Ex.: Carlos" autocomplete="name"/></div>'
-    +'<button class="btn btn-p btn-lg" onclick="salvarTec()">Continuar</button></div>';
-  $('app').innerHTML=h;
+  var qp=S._qp||'',h='<div class="card">';
+  if(!qp){
+    h+='<h3>Como você vai usar o app?</h3><div class="sub" style="margin-bottom:12px;">Fica gravado neste aparelho. Para trocar, toque no seu nome lá em cima.</div>'
+      +'<button class="btn btn-p btn-lg" style="margin-bottom:10px;" onclick="S._qp=\'tecnico\';render()">👷 Sou técnico de entrega</button>'
+      +'<button class="btn btn-g btn-lg" onclick="S._qp=\'comercial\';render()">💼 Sou do comercial</button>';
+  }else if(qp==='tecnico'){
+    var lista=S.tecsRua.length?S.tecsRua:S.tecs;
+    h+='<h3>Qual é o seu nome?</h3><div class="sub" style="margin-bottom:12px;">Você verá as entregas marcadas para você. O seu nome sai no pedido assinado.</div>'
+      +(lista.length?'<div class="chips" style="flex-wrap:wrap;">'+lista.map(function(n){return'<button class="chip'+(n===S.tecnico?' on':'')+'" onclick="entrar(\'tecnico\',this.textContent)">'+esc(n)+'</button>';}).join('')+'</div>'
+        :'<div class="info">Nenhum técnico cadastrado ainda. Peça ao comercial.</div>')
+      +'<div class="sub" style="margin-top:8px;">Não está na lista? Peça ao comercial para cadastrar você.</div>';
+  }else{
+    var outros=S.tecs.filter(function(n){return S.tecsRua.indexOf(n)<0;});
+    h+='<h3>Qual é o seu nome?</h3><div class="sub" style="margin-bottom:12px;">No comercial você define o técnico de cada entrega e monta as rotas.</div>'
+      +(outros.length?'<div class="chips" style="flex-wrap:wrap;">'+outros.map(function(n){return'<button class="chip'+(n===S.tecnico?' on':'')+'" onclick="entrar(\'comercial\',this.textContent)">'+esc(n)+'</button>';}).join('')+'</div>':'')
+      +'<div class="field"><label>'+(outros.length?'Não está na lista? Digite seu nome':'Seu nome')+'</label><input id="q-nome" placeholder="Ex.: Jessica" autocomplete="name"/></div>'
+      +'<button class="btn btn-p btn-lg" onclick="entrar(\'comercial\',val(\'q-nome\'))">Continuar</button>';
+  }
+  if(qp)h+='<button class="btn btn-g btn-sm" style="margin-top:12px;" onclick="S._qp=\'\';render()">‹ Voltar</button>';
+  $('app').innerHTML=h+'</div>';
 }
-function escolherTec(i){S.tecnico=S.tecs[i];lsSet('campo_tecnico',S.tecnico);S.tela='lista';render();if(!S.lista)carregarLista();iniciarLocal();}
-function salvarTec(){
-  var n=val('q-nome');if(!n){toast('Digite seu nome');return;}
-  S.tecnico=n;lsSet('campo_tecnico',n);
-  if(db&&S.tecs.map(semAcento).indexOf(semAcento(n))<0)db.collection(C_TEC).add({nome:n,criadoEm:Date.now()}).catch(function(){});
-  S.tela='lista';render();if(!S.lista)carregarLista();iniciarLocal();
+function entrar(perfil,nome){
+  nome=String(nome||'').trim();if(!nome){toast('Digite seu nome');return;}
+  S.perfil=perfil;S.tecnico=nome;S._qp='';S.aba='';
+  lsSet('campo_perfil',perfil);lsSet('campo_tecnico',nome);
+  if(perfil==='comercial'&&db&&S.tecs.map(semAcento).indexOf(semAcento(nome))<0)db.collection(C_TEC).add({nome:nome,criadoEm:Date.now()}).catch(function(){});
+  S.tela='lista';render();if(!S.lista)carregarLista();
+  if(perfil==='tecnico')iniciarLocal();else pararLocal();
 }
 
 /* ═══ Entregas (pedidos do Bling pela data prevista = dia da entrega) ═══
@@ -294,7 +313,7 @@ function rotuloDia(iso){
   var d=new Date(iso+'T12:00:00');return DIAS_SEM[d.getDay()]+' '+iso.slice(8,10)+'/'+iso.slice(5,7);
 }
 function datasDaLista(){
-  var c={};(S.lista||[]).forEach(function(o){var d=prev(o);if(d)c[d]=(c[d]||0)+1;});
+  var c={};(S.lista||[]).forEach(function(o){var d=prev(o);if(d&&(!ehTec()||tecDe(o.id)===S.tecnico))c[d]=(c[d]||0)+1;});
   return{datas:Object.keys(c).sort(),cont:c};
 }
 /* Data padrão: hoje, ou a próxima com entrega, ou a mais recente. */
@@ -319,6 +338,7 @@ function atribuir(ev,id,i){
 }
 function atrHtml(o){
   var t=tecDe(o.id);
+  if(ehTec())return'';
   if(!S.tecsRua.length)return t?'<div class="atr"><span>Técnico</span><button class="chip on">✔ '+esc(t)+'</button></div>':'';
   var nomes=S.tecsRua.slice();if(t&&nomes.indexOf(t)<0)nomes.push(t);
   return'<div class="atr" onclick="event.stopPropagation()"><span>Técnico</span>'
@@ -340,8 +360,8 @@ function statusReg(id){
   return'<span class="badge b-gray">Em atendimento</span>';
 }
 function renderLista(){
-  if(!S.tecnico)return renderQuem();
-  $('top').innerHTML='<h1>🚚 Entregas</h1><button class="who" onclick="S.tela=\'quem\';render()">👷 '+esc(S.tecnico)+'</button>';
+  if(!S.tecnico||!S.perfil)return renderQuem();
+  $('top').innerHTML='<h1>🚚 Entregas</h1>'+whoBtn();
   var dl=datasDaLista();
   if(S.filtro!=='feitas'&&!dl.cont[S.filtro])S.filtro=dataPadrao(dl.datas);
   var h='<input class="search" id="busca" placeholder="Buscar nº do pedido ou cliente" value="'+esc(S.busca)+'" oninput="S.busca=this.value;desenharItens()"/>'
@@ -349,7 +369,8 @@ function renderLista(){
     +dl.datas.map(function(d){return'<button class="chip'+(S.filtro===d?' on':'')+'" data-d="'+d+'" onclick="filtrar(\''+d+'\')">'+esc(rotuloDia(d))+' ('+dl.cont[d]+')</button>';}).join('')
     +'</div><div class="chips" id="chips-tec"></div><div class="chips">'
     +'<button class="chip'+(S.filtro==='feitas'?' on':'')+'" onclick="filtrar(\'feitas\')">✍️ Assinados ('+idsAssinados().length+')</button>'
-    +'<button class="chip" onclick="carregarLista()">'+(S.carregando?'<span class="spin"></span>':'↻')+' Atualizar</button></div>';
+    +'<button class="chip" onclick="carregarLista()">'+(S.carregando?'<span class="spin"></span>':'↻')+' Atualizar</button>'
+    +(ehTec()?'':'<a class="chip" style="text-decoration:none;" href="mapa/" target="_blank" rel="noopener">📍 Mapa dos técnicos</a>')+'</div>';
   if(S.listaErr)h+='<div class="err">Não foi possível buscar os pedidos no Bling: '+esc(S.listaErr)+'</div>';
   if(S.carregando&&!S.lista)h+='<div class="info"><span class="spin"></span> Buscando as entregas no Bling…</div>';
   h+='<div id="itens"></div>';
@@ -384,7 +405,8 @@ function desenharItens(){
     lista=lista.filter(function(o){return prev(o)===S.filtro;});
   }
   var abas=$('chips-tec'),porData=!busca&&S.filtro!=='feitas';
-  if(abas){abas.style.display=porData?'':'none';if(porData)abas.innerHTML=abasHtml(lista);}
+  if(ehTec())S.aba=S.tecnico;
+  if(abas){abas.style.display=porData&&!ehTec()?'':'none';if(porData&&!ehTec())abas.innerHTML=abasHtml(lista);}
   var topo='';
   if(porData&&!S.aba&&lista.length)topo=painelTodas(S.filtro,lista);
   if(porData&&S.aba){
@@ -399,7 +421,7 @@ function desenharItens(){
     }
   }
   if(!lista.length){
-    var msg=S.carregando||!S.lista?'':porData&&S.aba?(S.aba==='__sem'?'Todas as entregas desta data já têm técnico.':'Nenhuma entrega marcada para '+esc(S.aba)+' nesta data. Marque o técnico em cada pedido na aba "Todos".'):S.filtro==='feitas'&&!busca?'Nenhum pedido assinado ainda.':busca?'Nenhum pedido encontrado.':'Nenhuma entrega prevista de 7 dias atrás em diante.';
+    var msg=S.carregando||!S.lista?'':porData&&ehTec()?'Nenhuma entrega marcada para você. O comercial define as entregas de cada técnico.':porData&&S.aba?(S.aba==='__sem'?'Todas as entregas desta data já têm técnico.':'Nenhuma entrega marcada para '+esc(S.aba)+' nesta data. Marque o técnico em cada pedido na aba "Todos".'):S.filtro==='feitas'&&!busca?'Nenhum pedido assinado ainda.':busca?'Nenhum pedido encontrado.':'Nenhuma entrega prevista de 7 dias atrás em diante.';
     el.innerHTML=topo+(msg?'<div class="empty">'+msg+'</div>':'');return;
   }
   el.innerHTML=topo+lista.map(function(o){
@@ -424,15 +446,16 @@ function rotaDe(dia,tec){return S.rotas[rotaId(dia,tec)]||null;}
 var ROTA_CFG={saida:lsGet('campo_saida')||'08:00',parada:Number(lsGet('campo_parada'))||20};
 function rotaPainel(tec,dia,lista){
   var ro=rotaDe(dia,tec),res=ro&&ro.resultado,h='<div class="card rp" onclick="event.stopPropagation()">';
+  if(!res&&ehTec())return h+'<div class="sec" style="margin:0 0 4px;">🗺️ Sua rota · '+esc(rotuloDia(dia))+'</div><div class="sub">O comercial ainda não montou a sua rota. Siga a lista abaixo.</div></div>';
   if(res){
     var ids=lista.map(function(o){return o.id;}).sort().join(','),idsR=res.paradas.map(function(p){return p.id;}).concat(res.naoLocalizados.map(function(p){return p.id;})).sort().join(',');
-    h+='<div class="sec" style="margin:0 0 4px;">🗺️ Rota de '+esc(tec)+' · '+esc(rotuloDia(dia))+'</div>'
+    h+='<div class="sec" style="margin:0 0 4px;">🗺️ '+(ehTec()?'Sua rota':'Rota de '+esc(tec))+' · '+esc(rotuloDia(dia))+'</div>'
       +'<div class="rp-res"><span><b>'+res.paradas.length+'</b> paradas</span><span><b>'+String(res.distanciaKm).replace('.',',')+'</b> km</span>'
       +'<span>saída <b>'+esc(res.saida)+'</b></span><span>volta à loja <b>'+esc(res.volta)+'</b></span></div>'
-      +(ids!==idsR?'<div class="err" style="margin-bottom:8px;">As entregas de '+esc(tec)+' mudaram depois que a rota foi montada. Monte de novo.</div>':'')
+      +(ids!==idsR?'<div class="err" style="margin-bottom:8px;">'+(ehTec()?'Suas entregas mudaram depois que a rota foi montada. Peça ao comercial para montar de novo.':'As entregas de '+esc(tec)+' mudaram depois que a rota foi montada. Monte de novo.')+'</div>':'')
       +(res.naoLocalizados.length?'<div class="err" style="margin-bottom:8px;">'+res.naoLocalizados.length+' pedido(s) fora da rota: endereço não encontrado.</div>':'')
       +'<div class="actions"><button class="btn btn-p" onclick="abrirRota(\''+esc(dia)+'\',\''+esc(tec).replace(/'/g,"\\'")+'\')">Ver rota no mapa</button>'
-      +'<button class="btn btn-g" onclick="montarRota()">↻ Montar de novo</button></div>'
+      +(ehTec()?'':'<button class="btn btn-g" onclick="montarRota()">↻ Montar de novo</button>')+'</div>'
       +'<div class="sub" style="margin-top:6px;">Montada por '+esc(ro.por||'-')+' em '+fmtDH(ro.em)+(res.manual?' · ordem ajustada à mão':'')+'</div>';
   }else{
     h+='<div class="sec" style="margin:0 0 8px;">🗺️ Rota de '+esc(tec)+' · '+esc(rotuloDia(dia))+'</div>'
@@ -524,7 +547,7 @@ function linksGoogle(res,ordem){
 }
 function renderRota(){
   var r=S.rota,ro=rotaDe(r.dia,r.tecnico),res=ro.resultado;
-  $('top').innerHTML='<button class="back" onclick="history.back()">‹</button><h1>Rota · '+esc(r.tecnico)+'</h1><button class="who" onclick="S.tela=\'quem\';render()">👷 '+esc(S.tecnico)+'</button>';
+  $('top').innerHTML='<button class="back" onclick="history.back()">‹</button><h1>Rota · '+esc(r.tecnico)+'</h1>'+whoBtn();
   var links=linksGoogle(res,r.ordem);
   var h='<div class="card"><div class="sec" style="margin:0 0 4px;">'+esc(rotuloDia(r.dia))+' · '+fmtData(r.dia)+'</div>'
     +'<div class="rp-res"><span><b>'+res.paradas.length+'</b> paradas</span><span><b>'+String(res.distanciaKm).replace('.',',')+'</b> km</span>'
@@ -544,11 +567,11 @@ function renderRota(){
       +(p.aproximado?'<div class="badges"><span class="badge b-red">📍 Endereço localizado só de forma aproximada — confira</span></div>':'')
       +'<div class="actions" style="margin-top:6px;"><a class="btn btn-g btn-sm" style="text-decoration:none;" target="_blank" rel="noopener" href="'+navUrl(p)+'">🧭 Navegar</a>'
       +'<button class="btn btn-g btn-sm" onclick="abrirPedido('+p.id+')">Abrir pedido</button></div></div>'
-      +'<div class="mv"><button onclick="moverParada('+i+',-1)"'+(i?'':' disabled')+'>▲</button><button onclick="moverParada('+i+',1)"'+(i<r.ordem.length-1?'':' disabled')+'>▼</button></div></div>';
+      +(ehTec()?'':'<div class="mv"><button onclick="moverParada('+i+',-1)"'+(i?'':' disabled')+'>▲</button><button onclick="moverParada('+i+',1)"'+(i<r.ordem.length-1?'':' disabled')+'>▼</button></div>')+'</div>';
   }).join('')+'</div>';
   if(res.naoLocalizados.length)h+='<div class="card"><div class="sec" style="margin:0 0 6px;">Fora da rota</div>'
     +res.naoLocalizados.map(function(p){return'<div style="margin-bottom:6px;"><b>'+esc(p.cliente)+'</b> <span class="sub">· pedido '+esc(p.numero)+'</span><div class="sub">'+esc(p.motivo)+(p.endereco?': '+esc(p.endereco):'')+'. Corrija o endereço no Bling e monte de novo.</div></div>';}).join('')+'</div>';
-  h+='<div class="sub" style="margin:4px 2px 20px;">Montada por '+esc(ro.por||'-')+' em '+fmtDH(ro.em)+'. Use ▲▼ para mudar a ordem.</div>';
+  h+='<div class="sub" style="margin:4px 2px 20px;">Montada por '+esc(ro.por||'-')+' em '+fmtDH(ro.em)+'.'+(ehTec()?'':' Use ▲▼ para mudar a ordem.')+'</div>';
   $('app').innerHTML=h;
   desenharMapaRota(res,r.ordem);
 }
@@ -622,7 +645,7 @@ window.addEventListener('popstate',function(){if(S.tela==='ped'||S.tela==='rota'
 
 function renderPedido(){
   var o=S.ped||{},r=regAtual(),c=o.cliente||{};
-  $('top').innerHTML='<button class="back" onclick="history.back()">‹</button><h1>Pedido '+esc(o.numero||'')+'</h1><button class="who" onclick="S.tela=\'quem\';render()">👷 '+esc(S.tecnico)+'</button>';
+  $('top').innerHTML='<button class="back" onclick="history.back()">‹</button><h1>Pedido '+esc(o.numero||'')+'</h1>'+whoBtn();
   if(o._carregando){$('app').innerHTML='<div class="empty"><span class="spin"></span> Abrindo o pedido…</div>';return;}
   var h='';
   if(S.pedErr)h+='<div class="err">'+esc(S.pedErr)+'</div>';
@@ -1149,6 +1172,7 @@ async function enviarWhats(){
    caminho do dia. */
 var LOC_INTERVALO=10*60*1000,_ultLoc=0,_locTimer=null;
 function registrarLocal(origem,extra){
+  if(!ehTec()&&origem!=='assinatura')return;
   if(!db||!S.tecnico||!navigator.geolocation)return;
   if(origem!=='assinatura'&&Date.now()-_ultLoc<2*60*1000)return;
   _ultLoc=Date.now();
@@ -1163,11 +1187,13 @@ function gravarLocal(c,em,origem,extra){
   if(extra)for(var k in extra)doc[k]=extra[k];
   db.collection(C_LOC).add(doc).catch(function(){});
 }
+function pararLocal(){if(_locTimer){clearInterval(_locTimer);_locTimer=null;}}
 function iniciarLocal(){
+  if(!ehTec())return;
   registrarLocal('abertura');
   if(_locTimer)clearInterval(_locTimer);
   _locTimer=setInterval(function(){if(document.visibilityState==='visible')registrarLocal('periodico');},LOC_INTERVALO);
-  document.addEventListener('visibilitychange',function(){if(document.visibilityState==='visible')registrarLocal('abertura');});
+  document.addEventListener('visibilitychange',function(){if(document.visibilityState==='visible'&&_locTimer)registrarLocal('abertura');});
 }
 
 /* ═══ Início ═════════════════════════════════════════════════════════════ */
@@ -1175,7 +1201,7 @@ function iniciarLocal(){
   if(initFirebase())listen();
   try{var c=JSON.parse(lsGet('campo_lista')||'null');if(c&&c.lista&&c.hoje){S.lista=c.lista;S.hoje=c.hoje;}}catch(e){}
   render();
-  if(S.tecnico){carregarLista();iniciarLocal();}
+  if(S.tecnico&&S.perfil){carregarLista();iniciarLocal();}
 })();
 </script>
 </body>
