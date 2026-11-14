@@ -23,3 +23,10 @@ Mapa dos técnicos em `<site>/campo/mapa/`: caminho do dia de cada técnico, com
 as posições que o app grava em `campo_localizacoes` ao ser aberto, a cada
 10 minutos com ele aberto na tela e em cada assinatura. Com o celular
 bloqueado ou o app fechado, o navegador não entrega o GPS.
+
+Rotas: na data escolhida, uma aba por técnico de rua (`campo_tecnicos` com
+`rua: true`). Em cada aba, "Montar a melhor rota" chama
+`POST /api/bling/campo/rota` no `whatsapp-crm`, que localiza os endereços do
+Bling no Google, lê janelas de horário nas observações com a IA e devolve a
+melhor ordem saindo e voltando à loja. A rota fica em `campo_rotas` (id
+`dia_tecnico`) e a lista do técnico segue essa ordem.

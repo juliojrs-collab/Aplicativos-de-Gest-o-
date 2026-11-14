@@ -65,6 +65,21 @@ main{max-width:760px;margin:0 auto;padding:14px 14px 96px;}
 .os-main{flex:1;min-width:0;}
 .os-main .t{font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
 .os-main .s{font-size:12px;color:var(--text2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.st .badge{white-space:normal;}
+.ord{background:var(--blue);color:#fff;border-radius:6px;padding:2px 6px;font-size:13px;display:inline-block;margin-bottom:2px;}
+.rp{background:var(--blue-light);border:1px solid #b9dfe9;}
+.rp .g2{gap:0 10px;}
+.rp-res{display:flex;gap:12px;flex-wrap:wrap;font-size:13px;margin:4px 0 10px;}
+.rp-res b{font-size:15px;}
+#rmapa{height:46vh;min-height:260px;border-radius:var(--r);overflow:hidden;margin-bottom:12px;}
+.pin{background:var(--blue);color:#fff;border-radius:50%;width:28px;height:28px;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:13px;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.4);}
+.pin.loja{background:#111827;font-size:15px;}
+.pin.atr{background:var(--red);}
+.st{display:flex;gap:10px;align-items:flex-start;}
+.st .n{min-width:30px;height:30px;border-radius:50%;background:var(--blue);color:#fff;font-weight:800;display:flex;align-items:center;justify-content:center;}
+.st .m{flex:1;min-width:0;}
+.st .mv{display:flex;flex-direction:column;gap:4px;}
+.st .mv button{background:var(--surface2);border:1px solid var(--border2);border-radius:6px;width:34px;height:30px;font-size:14px;}
 .vend{font-size:12px;color:var(--text2);margin-top:2px;}
 .its-l{font-size:13px;margin-top:4px;line-height:1.35;}
 .its-l div{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
@@ -133,6 +148,7 @@ main{max-width:760px;margin:0 auto;padding:14px 14px 96px;}
    - campo_midias   → uma foto por documento, carregadas só ao abrir o pedido
    - campo_tecnicos → nomes dos técnicos de rua
    - campo_atribuicoes → técnico que vai fazer cada entrega (id = id do pedido)
+   - campo_rotas → rota montada de cada técnico no dia (id = dia_técnico)
    - campo_localizacoes → posição do técnico (ver "Localização" abaixo) */
 var FB_CFG={
   apiKey:"AIzaSyCdRdPIM7fjV-5prMCHs_3eYqS5aARSu5I",
@@ -143,7 +159,7 @@ var FB_CFG={
   appId:"1:132328899335:web:d9e7b99354b51de0a37ba2"
 };
 var API='https://whatsapp-crm-production-66bf.up.railway.app';
-var C_ATR='campo_atribuicoes',C_LOC='campo_localizacoes',C_REG='campo_pedidos',C_MID='campo_midias',C_TEC='campo_tecnicos';
+var C_ROTA='campo_rotas',C_ATR='campo_atribuicoes',C_LOC='campo_localizacoes',C_REG='campo_pedidos',C_MID='campo_midias',C_TEC='campo_tecnicos';
 var MAX_FOTOS=8;
 /* Perguntas obrigatórias do atendimento: respondidas antes da assinatura e
    impressas no PDF. A observação de cada uma é opcional. */
@@ -160,9 +176,11 @@ var TERMO='Declaro que recebi nesta data os produtos e/ou serviços descritos ne
 var db=null,FB_ERR='';
 var S={
   tela:'lista',tecnico:lsGet('campo_tecnico')||'',tecs:[],
+  tecsRua:[],
   lista:null,listaErr:'',carregando:false,filtro:'hoje',hoje:'',busca:'',
   reg:{},              /* campo_pedidos por id do pedido no Bling */
-  atr:{},soMeus:false, /* campo_atribuicoes: técnico de cada pedido */
+  atr:{},aba:'',        /* campo_atribuicoes: técnico de cada pedido; aba = técnico escolhido ('' todos, '__sem' sem técnico) */
+  rotas:{},rota:null,   /* campo_rotas por id; rota = a aberta na tela de rota */
   ped:null,pedErr:'',midias:[],enviando:false
 };
 
@@ -182,13 +200,22 @@ function initFirebase(){
 }
 function listen(){
   db.collection(C_TEC).onSnapshot(function(snap){
-    S.tecs=snap.docs.map(function(d){return d.data().nome||'';}).filter(Boolean).sort(function(a,b){return a.localeCompare(b);});
+    var docs=snap.docs.map(function(d){return d.data();}).filter(function(x){return x.nome;}),ordena=function(a,b){return a.localeCompare(b);};
+    S.tecs=docs.map(function(x){return x.nome;}).sort(ordena);
+    /* Técnicos de rua (rua: true no cadastro) são os que recebem entregas e
+       têm aba e rota; sem nenhum marcado, vale a lista inteira. */
+    var rua=docs.filter(function(x){return x.rua;}).map(function(x){return x.nome;}).sort(ordena);
+    S.tecsRua=rua.length?rua:S.tecs;
     if(S.tela==='quem')render();
     if(S.tela==='lista')desenharItens();
   },function(){});
   db.collection(C_ATR).orderBy('em','desc').limit(1000).onSnapshot(function(snap){
     S.atr={};snap.docs.forEach(function(d){S.atr[d.id]=d.data();});
     if(S.tela==='lista')renderLista();
+  },function(){});
+  db.collection(C_ROTA).orderBy('em','desc').limit(200).onSnapshot(function(snap){
+    S.rotas={};snap.docs.forEach(function(d){S.rotas[d.id]=d.data();});
+    if(S.tela==='lista')desenharItens();
   },function(){});
   db.collection(C_REG).orderBy('atualizadoEm','desc').limit(300).onSnapshot(function(snap){
     S.reg={};snap.docs.forEach(function(d){S.reg[d.id]=d.data();});
@@ -221,6 +248,7 @@ function render(){
   if(FB_ERR){$('top').innerHTML='<h1>🚚 Entregas</h1>';$('app').innerHTML='<div class="err">'+esc(FB_ERR)+'</div>';return;}
   if(!S.tecnico||S.tela==='quem')return renderQuem();
   if(S.tela==='ped')return renderPedido();
+  if(S.tela==='rota')return renderRota();
   renderLista();
 }
 
@@ -280,7 +308,7 @@ function ehMeu(o){return semAcento(tecDe(o.id))===semAcento(S.tecnico);}
 /* Marca (ou desmarca, no segundo toque) o técnico que vai fazer a entrega. */
 function atribuir(ev,id,i){
   ev.stopPropagation();
-  var nome=S.tecs[i],k=String(id);
+  var nome=S.tecsRua[i],k=String(id);
   if(tecDe(id)===nome){delete S.atr[k];db.collection(C_ATR).doc(k).delete().catch(function(e){toast('Erro: '+e.message);});}
   else{
     var o=(S.lista||[]).filter(function(x){return String(x.id)===k;})[0]||{};
@@ -291,10 +319,10 @@ function atribuir(ev,id,i){
 }
 function atrHtml(o){
   var t=tecDe(o.id);
-  if(!S.tecs.length)return t?'<div class="atr"><span>Técnico</span><button class="chip on">✔ '+esc(t)+'</button></div>':'';
-  var nomes=S.tecs.slice();if(t&&nomes.indexOf(t)<0)nomes.push(t);
+  if(!S.tecsRua.length)return t?'<div class="atr"><span>Técnico</span><button class="chip on">✔ '+esc(t)+'</button></div>':'';
+  var nomes=S.tecsRua.slice();if(t&&nomes.indexOf(t)<0)nomes.push(t);
   return'<div class="atr" onclick="event.stopPropagation()"><span>Técnico</span>'
-    +nomes.map(function(n){var i=S.tecs.indexOf(n);return'<button class="chip'+(n===t?' on':'')+'"'+(i<0?' disabled':' onclick="atribuir(event,'+o.id+','+i+')"')+'>'+(n===t?'✔ ':'')+esc(n)+'</button>';}).join('')+'</div>';
+    +nomes.map(function(n){var i=S.tecsRua.indexOf(n);return'<button class="chip'+(n===t?' on':'')+'"'+(i<0?' disabled':' onclick="atribuir(event,'+o.id+','+i+')"')+'>'+(n===t?'✔ ':'')+esc(n)+'</button>';}).join('')+'</div>';
 }
 function itensResumo(o){
   if(o.itens==null)return'<div class="its-l sub">Itens: abra o pedido para ver</div>';
@@ -319,8 +347,7 @@ function renderLista(){
   var h='<input class="search" id="busca" placeholder="Buscar nº do pedido ou cliente" value="'+esc(S.busca)+'" oninput="S.busca=this.value;desenharItens()"/>'
     +'<div class="chips" id="chips-datas">'
     +dl.datas.map(function(d){return'<button class="chip'+(S.filtro===d?' on':'')+'" data-d="'+d+'" onclick="filtrar(\''+d+'\')">'+esc(rotuloDia(d))+' ('+dl.cont[d]+')</button>';}).join('')
-    +'</div><div class="chips">'
-    +'<button class="chip'+(S.soMeus?' on':'')+'" onclick="S.soMeus=!S.soMeus;renderLista()">👷 Só os meus ('+(S.lista||[]).filter(function(o){return ehMeu(o)&&(S.filtro==='feitas'||prev(o)===S.filtro);}).length+')</button>'
+    +'</div><div class="chips" id="chips-tec"></div><div class="chips">'
     +'<button class="chip'+(S.filtro==='feitas'?' on':'')+'" onclick="filtrar(\'feitas\')">✍️ Assinados ('+idsAssinados().length+')</button>'
     +'<button class="chip" onclick="carregarLista()">'+(S.carregando?'<span class="spin"></span>':'↻')+' Atualizar</button></div>';
   if(S.listaErr)h+='<div class="err">Não foi possível buscar os pedidos no Bling: '+esc(S.listaErr)+'</div>';
@@ -333,6 +360,17 @@ function renderLista(){
   desenharItens();
 }
 function filtrar(f){S.filtro=f;renderLista();}
+function escolherAba(i){S.aba=i==='todos'?'':i==='sem'?'__sem':S.tecsRua[i];desenharItens();}
+/* Uma aba por técnico na data escolhida, com a quantidade de entregas dele. */
+function abasHtml(doDia){
+  var cont={},sem=0;
+  doDia.forEach(function(o){var t=tecDe(o.id);if(t)cont[t]=(cont[t]||0)+1;else sem++;});
+  var nomes=S.tecsRua.slice();Object.keys(cont).forEach(function(n){if(nomes.indexOf(n)<0)nomes.push(n);});
+  function chip(sel,on,rot){return'<button class="chip'+(on?' on':'')+'" onclick="escolherAba('+sel+')">'+rot+'</button>';}
+  return chip("'todos'",!S.aba,'Todos ('+doDia.length+')')
+    +nomes.map(function(n){var i=S.tecsRua.indexOf(n);return i<0?'':chip(i,S.aba===n,'👷 '+esc(n)+' ('+(cont[n]||0)+')');}).join('')
+    +chip("'sem'",S.aba==='__sem','Sem técnico ('+sem+')');
+}
 function desenharItens(){
   var el=$('itens');if(!el)return;
   var lista=(S.lista||[]).slice(),q=semAcento(S.busca),busca=!!q;
@@ -345,15 +383,29 @@ function desenharItens(){
   }else{
     lista=lista.filter(function(o){return prev(o)===S.filtro;});
   }
-  if(S.soMeus)lista=lista.filter(ehMeu);
-  if(!lista.length){
-    var msg=S.carregando||!S.lista?'':S.soMeus?'Nenhuma entrega marcada para você nesta data.':S.filtro==='feitas'&&!busca?'Nenhum pedido assinado ainda.':busca?'Nenhum pedido encontrado.':'Nenhuma entrega prevista de 7 dias atrás em diante.';
-    el.innerHTML=msg?'<div class="empty">'+msg+'</div>':'';return;
+  var abas=$('chips-tec'),porData=!busca&&S.filtro!=='feitas';
+  if(abas){abas.style.display=porData?'':'none';if(porData)abas.innerHTML=abasHtml(lista);}
+  var topo='';
+  if(porData&&!S.aba&&lista.length)topo=painelTodas(S.filtro,lista);
+  if(porData&&S.aba){
+    lista=lista.filter(function(o){return S.aba==='__sem'?!tecDe(o.id):tecDe(o.id)===S.aba;});
+    if(S.aba!=='__sem'&&lista.length){
+      topo=rotaPainel(S.aba,S.filtro,lista);
+      /* Com rota montada, a lista segue a ordem dela. */
+      var ro=rotaDe(S.filtro,S.aba),pos={};
+      if(ro&&ro.resultado)ro.resultado.paradas.forEach(function(p,i){pos[p.id]={n:i+1,h:p.chegada};});
+      lista.sort(function(a,b){return(pos[a.id]?pos[a.id].n:999)-(pos[b.id]?pos[b.id].n:999);});
+      lista.forEach(function(o){o._rota=pos[o.id]||null;});
+    }
   }
-  el.innerHTML=lista.map(function(o){
+  if(!lista.length){
+    var msg=S.carregando||!S.lista?'':porData&&S.aba?(S.aba==='__sem'?'Todas as entregas desta data já têm técnico.':'Nenhuma entrega marcada para '+esc(S.aba)+' nesta data. Marque o técnico em cada pedido na aba "Todos".'):S.filtro==='feitas'&&!busca?'Nenhum pedido assinado ainda.':busca?'Nenhum pedido encontrado.':'Nenhuma entrega prevista de 7 dias atrás em diante.';
+    el.innerHTML=topo+(msg?'<div class="empty">'+msg+'</div>':'');return;
+  }
+  el.innerHTML=topo+lista.map(function(o){
     var d=prev(o);
     return'<div class="card os" onclick="abrirPedido('+o.id+')">'
-      +'<div class="os-num">'+esc(o.numero||'s/ nº')+'</div>'
+      +'<div class="os-num">'+(o._rota&&S.aba?'<div class="ord">'+o._rota.n+'º</div><div class="sub">'+esc(o._rota.h)+'</div>':'')+esc(o.numero||'s/ nº')+'</div>'
       +'<div class="os-main"><div class="t">'+esc(o.cliente||'Cliente')+'</div>'
       +'<div class="s">'+(o.total?money(o.total):'')+((busca||S.filtro==='feitas')&&d?' · entrega '+fmtData(d):'')+'</div>'
       +(o.vendedor?'<div class="vend">Vendedor: <b>'+esc(o.vendedor)+'</b></div>':'')
@@ -361,6 +413,186 @@ function desenharItens(){
       +'<div class="badges">'+(o._em?'<span class="badge b-gray">'+fmtDH(o._em)+'</span>':'')+statusReg(o.id)+'</div>'
       +atrHtml(o)+'</div></div>';
   }).join('');
+}
+
+/* ═══ Rota do técnico ════════════════════════════════════════════════════
+   O servidor localiza cada endereço do Bling no Google, a IA lê janelas de
+   horário nas observações e sai a melhor ordem, da loja e de volta à loja.
+   A rota fica salva em campo_rotas para o técnico ver no celular dele. */
+function rotaId(dia,tec){return dia+'_'+semAcento(tec).replace(/[^a-z0-9]+/g,'-');}
+function rotaDe(dia,tec){return S.rotas[rotaId(dia,tec)]||null;}
+var ROTA_CFG={saida:lsGet('campo_saida')||'08:00',parada:Number(lsGet('campo_parada'))||20};
+function rotaPainel(tec,dia,lista){
+  var ro=rotaDe(dia,tec),res=ro&&ro.resultado,h='<div class="card rp" onclick="event.stopPropagation()">';
+  if(res){
+    var ids=lista.map(function(o){return o.id;}).sort().join(','),idsR=res.paradas.map(function(p){return p.id;}).concat(res.naoLocalizados.map(function(p){return p.id;})).sort().join(',');
+    h+='<div class="sec" style="margin:0 0 4px;">🗺️ Rota de '+esc(tec)+' · '+esc(rotuloDia(dia))+'</div>'
+      +'<div class="rp-res"><span><b>'+res.paradas.length+'</b> paradas</span><span><b>'+String(res.distanciaKm).replace('.',',')+'</b> km</span>'
+      +'<span>saída <b>'+esc(res.saida)+'</b></span><span>volta à loja <b>'+esc(res.volta)+'</b></span></div>'
+      +(ids!==idsR?'<div class="err" style="margin-bottom:8px;">As entregas de '+esc(tec)+' mudaram depois que a rota foi montada. Monte de novo.</div>':'')
+      +(res.naoLocalizados.length?'<div class="err" style="margin-bottom:8px;">'+res.naoLocalizados.length+' pedido(s) fora da rota: endereço não encontrado.</div>':'')
+      +'<div class="actions"><button class="btn btn-p" onclick="abrirRota(\''+esc(dia)+'\',\''+esc(tec).replace(/'/g,"\\'")+'\')">Ver rota no mapa</button>'
+      +'<button class="btn btn-g" onclick="montarRota()">↻ Montar de novo</button></div>'
+      +'<div class="sub" style="margin-top:6px;">Montada por '+esc(ro.por||'-')+' em '+fmtDH(ro.em)+(res.manual?' · ordem ajustada à mão':'')+'</div>';
+  }else{
+    h+='<div class="sec" style="margin:0 0 8px;">🗺️ Rota de '+esc(tec)+' · '+esc(rotuloDia(dia))+'</div>'
+      +'<div class="g2"><div class="field"><label>Saída da loja</label><input type="time" id="rp-saida" value="'+esc(ROTA_CFG.saida)+'"/></div>'
+      +'<div class="field"><label>Tempo em cada cliente (min)</label><input type="number" id="rp-parada" min="0" max="180" value="'+ROTA_CFG.parada+'"/></div></div>'
+      +'<button class="btn btn-p btn-lg" id="rp-btn" onclick="montarRota()">🗺️ Montar a melhor rota ('+lista.length+' entrega'+(lista.length===1?'':'s')+')</button>'
+      +'<div class="sub" style="margin-top:6px;">Sai da loja, passa por todos os endereços na melhor ordem e volta. Horários escritos nas observações do pedido (ex.: "só à tarde") são respeitados.</div>';
+  }
+  return h+'</div>';
+}
+function idsDoTecnico(dia,tec){return(S.lista||[]).filter(function(o){return prev(o)===dia&&tecDe(o.id)===tec;}).map(function(o){return o.id;});}
+async function calcularRota(dia,tec,ids,saida,parada,manual){
+  var res=await api('/api/bling/campo/rota',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({pedidos:ids,dia:dia,saida:saida,parada:parada,manterOrdem:!!manual})});
+  var doc={dia:dia,tecnico:tec,por:S.tecnico,em:Date.now(),resultado:res};
+  S.rotas[rotaId(dia,tec)]=doc;
+  db.collection(C_ROTA).doc(rotaId(dia,tec)).set(doc).catch(function(e){toast('Rota não salva: '+e.message);});
+  return doc;
+}
+/* Aba "Todos": situação da rota de cada técnico e um botão para montar todas. */
+function painelTodas(dia,doDia){
+  var tecs={};doDia.forEach(function(o){var t=tecDe(o.id);if(t)tecs[t]=(tecs[t]||0)+1;});
+  var nomes=Object.keys(tecs).sort();if(!nomes.length)return'';
+  var faltam=nomes.filter(function(t){return!rotaDe(dia,t);});
+  return'<div class="card rp" onclick="event.stopPropagation()"><div class="sec" style="margin:0 0 6px;">🗺️ Rotas de '+esc(rotuloDia(dia))+'</div>'
+    +nomes.map(function(t){var ro=rotaDe(dia,t),res=ro&&ro.resultado;
+      return'<div style="margin-bottom:4px;font-size:13px;">👷 <b>'+esc(t)+'</b> · '+tecs[t]+' entrega'+(tecs[t]===1?'':'s')+' · '
+        +(res?'✅ rota montada ('+String(res.distanciaKm).replace('.',',')+' km, volta '+esc(res.volta)+')':'<span style="color:var(--amber)">sem rota</span>')+'</div>';}).join('')
+    +'<div class="g2" style="margin-top:8px;"><div class="field"><label>Saída da loja</label><input type="time" id="rt-saida" value="'+esc(ROTA_CFG.saida)+'"/></div>'
+    +'<div class="field"><label>Tempo em cada cliente (min)</label><input type="number" id="rt-parada" min="0" max="180" value="'+ROTA_CFG.parada+'"/></div></div>'
+    +'<button class="btn btn-p btn-lg" id="rt-btn" onclick="montarTodas('+(faltam.length?'false':'true')+')">'+(faltam.length?'🗺️ Montar as rotas que faltam ('+faltam.length+')':'↻ Montar todas de novo ('+nomes.length+')')+'</button>'
+    +'<div class="sub" style="margin-top:6px;">Cada técnico recebe a sua rota, saindo da loja e voltando. Entregas sem técnico marcado ficam de fora.</div></div>';
+}
+async function montarTodas(todas){
+  var dia=S.filtro,saida=val('rt-saida')||ROTA_CFG.saida,parada=Number(val('rt-parada'))||0;
+  ROTA_CFG={saida:saida,parada:parada};lsSet('campo_saida',saida);lsSet('campo_parada',String(parada));
+  var tecs={};(S.lista||[]).forEach(function(o){var t=tecDe(o.id);if(t&&prev(o)===dia)tecs[t]=1;});
+  var nomes=Object.keys(tecs).sort().filter(function(t){return todas||!rotaDe(dia,t);}),erros=[];
+  for(var i=0;i<nomes.length;i++){
+    var btn=$('rt-btn');if(btn){btn.disabled=true;btn.innerHTML='<span class="spin"></span> Montando a rota de '+esc(nomes[i])+' ('+(i+1)+' de '+nomes.length+')…';}
+    try{await calcularRota(dia,nomes[i],idsDoTecnico(dia,nomes[i]),saida,parada,false);}
+    catch(e){erros.push(nomes[i]+': '+e.message);}
+  }
+  if(erros.length)alert('Algumas rotas não foram montadas:\n\n'+erros.join('\n'));
+  else toast('Rotas montadas ✔');
+  if(S.tela==='lista')desenharItens();
+}
+async function montarRota(ordemManual){
+  var tec=ordemManual?S.rota.tecnico:S.aba,dia=ordemManual?S.rota.dia:S.filtro;
+  var antiga=rotaDe(dia,tec),saida=$('rp-saida')?val('rp-saida'):(antiga&&antiga.resultado.saida)||ROTA_CFG.saida;
+  var parada=$('rp-parada')?Number(val('rp-parada'))||0:(antiga&&antiga.resultado.parada)||ROTA_CFG.parada;
+  ROTA_CFG={saida:saida,parada:parada};lsSet('campo_saida',saida);lsSet('campo_parada',String(parada));
+  var ids=ordemManual||idsDoTecnico(dia,tec);
+  if(!ids.length){toast('Nenhuma entrega marcada para '+tec);return;}
+  var btn=$('rp-btn')||$('rr-btn');if(btn){btn.disabled=true;btn.innerHTML='<span class="spin"></span> Montando a rota… (pode levar até 1 minuto)';}
+  if(!ordemManual&&!$('rp-btn'))toast('Montando a rota…');
+  try{
+    await calcularRota(dia,tec,ids,saida,parada,!!ordemManual);
+    abrirRota(dia,tec,!!ordemManual);
+  }catch(e){
+    alert('Não foi possível montar a rota:\n\n'+e.message);
+    if(btn){btn.disabled=false;btn.textContent='Tentar de novo';}
+  }
+}
+function abrirRota(dia,tec,substituir){
+  var ro=rotaDe(dia,tec);if(!ro)return;
+  S.rota={dia:dia,tecnico:tec,ordem:ro.resultado.paradas.slice(),alterada:false};
+  if(S.tela!=='rota'){S.tela='rota';if(!substituir)history.pushState({rota:1},'');}
+  window.scrollTo(0,0);renderRota();
+}
+function moverParada(i,d){
+  var o=S.rota.ordem,j=i+d;if(j<0||j>=o.length)return;
+  var x=o[i];o[i]=o[j];o[j]=x;S.rota.alterada=true;renderRota();
+}
+function navUrl(p){return'https://www.google.com/maps/dir/?api=1&destination='+p.lat+','+p.lng+'&travelmode=driving';}
+/* Link do Google Maps com a rota inteira. O link aceita até 9 paradas
+   intermediárias: rota maior sai em partes, cada uma emendando na anterior. */
+function linksGoogle(res,ordem){
+  var pts=[{lat:res.loja.lat,lng:res.loja.lng}].concat(ordem).concat([{lat:res.loja.lat,lng:res.loja.lng}]),links=[];
+  for(var i=0;i<pts.length-1;i+=10){
+    var trecho=pts.slice(i,Math.min(i+11,pts.length));
+    var u='https://www.google.com/maps/dir/?api=1&travelmode=driving&origin='+trecho[0].lat+','+trecho[0].lng
+      +'&destination='+trecho[trecho.length-1].lat+','+trecho[trecho.length-1].lng;
+    var meio=trecho.slice(1,-1);
+    if(meio.length)u+='&waypoints='+meio.map(function(p){return p.lat+','+p.lng;}).join('%7C');
+    links.push(u);
+  }
+  return links;
+}
+function renderRota(){
+  var r=S.rota,ro=rotaDe(r.dia,r.tecnico),res=ro.resultado;
+  $('top').innerHTML='<button class="back" onclick="history.back()">‹</button><h1>Rota · '+esc(r.tecnico)+'</h1><button class="who" onclick="S.tela=\'quem\';render()">👷 '+esc(S.tecnico)+'</button>';
+  var links=linksGoogle(res,r.ordem);
+  var h='<div class="card"><div class="sec" style="margin:0 0 4px;">'+esc(rotuloDia(r.dia))+' · '+fmtData(r.dia)+'</div>'
+    +'<div class="rp-res"><span><b>'+res.paradas.length+'</b> paradas</span><span><b>'+String(res.distanciaKm).replace('.',',')+'</b> km</span>'
+    +'<span>~<b>'+Math.floor(res.duracaoMin/60)+'h'+pad(res.duracaoMin%60)+'</b> dirigindo</span>'
+    +'<span>saída <b>'+esc(res.saida)+'</b> · volta <b>'+esc(res.volta)+'</b></span></div>'
+    +links.map(function(u,i){return'<a class="btn btn-ok btn-lg" style="margin-top:6px;text-decoration:none;" target="_blank" rel="noopener" href="'+u+'">🧭 Abrir no Google Maps'+(links.length>1?' — parte '+(i+1)+' de '+links.length:'')+'</a>';}).join('')
+    +'</div><div id="rmapa"></div>';
+  if(r.alterada)h+='<div class="info">Você mudou a ordem. <button class="btn btn-p btn-sm" id="rr-btn" onclick="recalcularRota()">Recalcular horários com esta ordem</button></div>';
+  h+='<div class="card">'+r.ordem.map(function(p,i){
+    var jan=p.janela?(p.janela.nota||((p.janela.inicio?'a partir de '+p.janela.inicio:'')+(p.janela.fim?' até '+p.janela.fim:''))):'';
+    return'<div class="st" style="'+(i?'border-top:1px solid var(--border);padding-top:10px;margin-top:10px;':'')+'">'
+      +'<div class="n"'+(p.atrasado?' style="background:var(--red)"':'')+'>'+(i+1)+'</div>'
+      +'<div class="m"><div><b>'+esc(p.cliente||'Cliente')+'</b> <span class="sub">· pedido '+esc(p.numero)+'</span></div>'
+      +'<div class="sub">'+esc(p.endereco||'')+'</div>'
+      +(r.alterada?'':'<div style="font-size:13px;margin-top:2px;">Chegada prevista <b>'+esc(p.chegada)+'</b>'+(p.espera>=10?' <span class="sub">(espera '+p.espera+' min pelo horário do cliente)</span>':'')+'</div>')
+      +(jan?'<div class="badges"><span class="badge '+(p.atrasado?'b-red':'b-amber')+'">🕒 '+esc(jan)+(p.atrasado?' · não dá para cumprir':'')+'</span></div>':'')
+      +(p.aproximado?'<div class="badges"><span class="badge b-red">📍 Endereço localizado só de forma aproximada — confira</span></div>':'')
+      +'<div class="actions" style="margin-top:6px;"><a class="btn btn-g btn-sm" style="text-decoration:none;" target="_blank" rel="noopener" href="'+navUrl(p)+'">🧭 Navegar</a>'
+      +'<button class="btn btn-g btn-sm" onclick="abrirPedido('+p.id+')">Abrir pedido</button></div></div>'
+      +'<div class="mv"><button onclick="moverParada('+i+',-1)"'+(i?'':' disabled')+'>▲</button><button onclick="moverParada('+i+',1)"'+(i<r.ordem.length-1?'':' disabled')+'>▼</button></div></div>';
+  }).join('')+'</div>';
+  if(res.naoLocalizados.length)h+='<div class="card"><div class="sec" style="margin:0 0 6px;">Fora da rota</div>'
+    +res.naoLocalizados.map(function(p){return'<div style="margin-bottom:6px;"><b>'+esc(p.cliente)+'</b> <span class="sub">· pedido '+esc(p.numero)+'</span><div class="sub">'+esc(p.motivo)+(p.endereco?': '+esc(p.endereco):'')+'. Corrija o endereço no Bling e monte de novo.</div></div>';}).join('')+'</div>';
+  h+='<div class="sub" style="margin:4px 2px 20px;">Montada por '+esc(ro.por||'-')+' em '+fmtDH(ro.em)+'. Use ▲▼ para mudar a ordem.</div>';
+  $('app').innerHTML=h;
+  desenharMapaRota(res,r.ordem);
+}
+function recalcularRota(){montarRota(S.rota.ordem.map(function(p){return p.id;}));}
+
+var LEAFLET_JS='https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js',LEAFLET_CSS='https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css',_leafP=null;
+function carregarLeaflet(){
+  if(window.L)return Promise.resolve();
+  if(_leafP)return _leafP;
+  _leafP=new Promise(function(ok,fail){
+    var c=document.createElement('link');c.rel='stylesheet';c.href=LEAFLET_CSS;document.head.appendChild(c);
+    var sc=document.createElement('script');sc.src=LEAFLET_JS;sc.onload=function(){ok();};
+    sc.onerror=function(){_leafP=null;fail(new Error('Não foi possível carregar o mapa'));};document.head.appendChild(sc);
+  });
+  return _leafP;
+}
+/* Linha da rota no formato do Google (encoded polyline). */
+function decodePolyline(s){
+  var pts=[],i=0,lat=0,lng=0;
+  while(i<s.length){
+    var b,sh=0,r=0;do{b=s.charCodeAt(i++)-63;r|=(b&31)<<sh;sh+=5;}while(b>=32);lat+=(r&1)?~(r>>1):(r>>1);
+    sh=0;r=0;do{b=s.charCodeAt(i++)-63;r|=(b&31)<<sh;sh+=5;}while(b>=32);lng+=(r&1)?~(r>>1):(r>>1);
+    pts.push([lat/1e5,lng/1e5]);
+  }
+  return pts;
+}
+var _mapaRota=null;
+function desenharMapaRota(res,ordem){
+  carregarLeaflet().then(function(){
+    var el=$('rmapa');if(!el)return;
+    if(_mapaRota){_mapaRota.remove();_mapaRota=null;}
+    var m=L.map(el);_mapaRota=m;
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19,attribution:'&copy; OpenStreetMap'}).addTo(m);
+    var lim=[[res.loja.lat,res.loja.lng]];
+    if(res.polyline&&!S.rota.alterada){var ll=decodePolyline(res.polyline);L.polyline(ll,{color:'#0c85aa',weight:5,opacity:.85}).addTo(m);lim=lim.concat(ll);}
+    else L.polyline([[res.loja.lat,res.loja.lng]].concat(ordem.map(function(p){return[p.lat,p.lng];})).concat([[res.loja.lat,res.loja.lng]]),{color:'#0c85aa',weight:3,dashArray:'6 8'}).addTo(m);
+    L.marker([res.loja.lat,res.loja.lng],{icon:L.divIcon({className:'',html:'<div class="pin loja">🏠</div>',iconSize:[28,28],iconAnchor:[14,14]})}).bindPopup('<b>Loja</b><br>Saída '+esc(res.saida)+' · volta '+esc(res.volta)).addTo(m);
+    ordem.forEach(function(p,i){
+      lim.push([p.lat,p.lng]);
+      L.marker([p.lat,p.lng],{icon:L.divIcon({className:'',html:'<div class="pin'+(p.atrasado?' atr':'')+'">'+(i+1)+'</div>',iconSize:[28,28],iconAnchor:[14,14]})})
+        .bindPopup('<b>'+(i+1)+'. '+esc(p.cliente)+'</b><br>Pedido '+esc(p.numero)+(S.rota.alterada?'':'<br>Chegada '+esc(p.chegada))).addTo(m);
+    });
+    m.fitBounds(lim,{padding:[30,30]});
+  }).catch(function(e){var el=$('rmapa');if(el)el.innerHTML='<div class="err">'+esc(e.message)+'</div>';});
 }
 
 /* ═══ Pedido aberto ═════════════════════════════════════════════════════ */
@@ -386,7 +618,7 @@ async function abrirPedido(id){
   if(S.tela==='ped'&&S.ped.id===id)renderPedido();
 }
 function voltar(){S.tela='lista';S.ped=null;render();}
-window.addEventListener('popstate',function(){if(S.tela==='ped')voltar();});
+window.addEventListener('popstate',function(){if(S.tela==='ped'||S.tela==='rota')voltar();});
 
 function renderPedido(){
   var o=S.ped||{},r=regAtual(),c=o.cliente||{};
