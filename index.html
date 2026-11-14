@@ -1491,6 +1491,7 @@ function detalheHtml(o,midias){
     +'<dt>Orçamento até</dt><dd>'+fmtData(pz.orcamento)+' '+situacaoPrazo(pz.orcamento,entregaOrc(o))+'</dd>'
     +(o.aprovado===false?'':'<dt>Finalização até</dt><dd>'+(pz.entrega?fmtData(pz.entrega)+' '+situacaoPrazo(pz.entrega,o.tempos.servFim):'<span class="sub">definida pelo técnico ao finalizar o orçamento</span>')+'</dd>')
     +'</dl>'
+    +(o.blingId&&o.blingSituacaoErro?'<div class="err" style="margin-top:8px;">A situação "Não aprovada" não foi para o Bling: '+esc(o.blingSituacaoErro)+' <button class="btn btn-g btn-sm" onclick="situacaoBling(\''+o.id+'\',\'Não aprovada\')">Tentar de novo</button></div>':'')
     +(o.blingId&&o.blingDatasErro?'<div class="err" style="margin-top:8px;">As datas não foram para o Bling: '+esc(o.blingDatasErro)+' <button class="btn btn-g btn-sm" onclick="reenviarDatasBling(\''+o.id+'\')">Tentar de novo</button></div>':'')
     +(ehExterno()?'':'<div style="text-align:right;margin-top:8px;"><button class="btn btn-g btn-sm" onclick="alterarPrazos(\''+o.id+'\')">📅 Alterar prazos</button></div>')+'</div>';
   /* Linha do tempo */
@@ -1950,7 +1951,22 @@ function clienteDesistiu(id){
       await avancar(id,{etapa:'devolver',aprovado:false,'tempos.desistiu':agora,
         desistencia:{em:agora,por:q,motivo:m,etapaAnterior:o.etapa,aprovadoEm:o.tempos.resposta||null},
         obsResposta:(o.obsResposta?o.obsResposta+' · ':'')+'Voltou atrás: '+m},'Registrado — devolver o aparelho ao cliente');
+      if(o.blingId)situacaoBling(id,'Não aprovada');
     });
+}
+/* Muda a situação da OS no Bling. Se falhar, avisa para mudar à mão. */
+async function situacaoBling(id,nome){
+  var o=getOS(id);if(!o||!o.blingId)return;
+  try{
+    var r=await fetch(API+'/api/bling/os/'+o.blingId+'/situacao',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({nome:nome})});
+    var j=await r.json().catch(function(){return{};});
+    if(!r.ok)throw new Error(j.error||('HTTP '+r.status));
+    await db.collection(C_OS).doc(id).update({blingSituacao:nome,blingSituacaoErro:''});
+    toast('OS marcada como "'+nome+'" também no Bling');
+  }catch(e){
+    try{await db.collection(C_OS).doc(id).update({blingSituacaoErro:e.message});}catch(x){}
+    alert('No app ficou registrado, mas o Bling não mudou para "'+nome+'": '+e.message+'\nMude a situação direto na OS do Bling.');
+  }
 }
 function iniciarServ(id){
   var o=getOS(id);
