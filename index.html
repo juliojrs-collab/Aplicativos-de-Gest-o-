@@ -704,7 +704,7 @@ function renderTabs(){
   $('tabs').innerHTML=TABS.filter(function(t){return!t.so||t.so.split(' ').indexOf(S.setor)>=0;}).map(function(t){return'<button class="tab'+(S.view===t.k?' on':'')+'" onclick="go(\''+t.k+'\')">'+(ehExterno()&&t.l2||t.l)+'</button>';}).join('');
 }
 /* Ao abrir o app, sempre a tela de escolha do setor. */
-function escolherSetor(s){S.setor=s;S.view='lista';S.filtro='abertas';S.busca='';limparAlertas();destravarSom();if(lerLocal('telaAcesa'))telaAcesa(true);window.scrollTo(0,0);render();}
+function escolherSetor(s){S.setor=s;S.view='lista';S.filtro=s==='manutencao'?'minhas':'abertas';S.busca='';limparAlertas();destravarSom();if(lerLocal('telaAcesa'))telaAcesa(true);window.scrollTo(0,0);render();}
 function trocarSetor(){S.setor='';limparAlertas();fecharModal();window.scrollTo(0,0);render();}
 function vInicio(){
   function n(s){return S.os.filter(function(o){return DONO[o.etapa]===s;}).length;}
@@ -827,7 +827,12 @@ function casaBusca(o,q){
   return normBusca(q).split(/\s+/).filter(Boolean).every(function(p){return t.indexOf(p)>=0;});
 }
 function vLista(){
-  var fil=FILTROS.filter(function(x){return x.k===S.filtro;})[0]||FILTROS[0];
+  /* Manutenção: só "Com o meu setor" e "Atrasadas" (as do setor). */
+  var CHIPS=ehManutencao()?[
+    {k:'minhas',l:'Com o meu setor',f:function(o){return DONO[o.etapa]===S.setor;}},
+    {k:'atrasadas',l:'⚠ Atrasadas',f:function(o){return DONO[o.etapa]===S.setor&&prazoVencido(o);}}]:FILTROS;
+  var fil=CHIPS.filter(function(x){return x.k===S.filtro;})[0]||CHIPS[0];
+  if(fil.k!==S.filtro)S.filtro=fil.k;
   var q=S.busca.trim().toLowerCase();
   /* Com texto na busca, procura em todas as OS (também entregues), não só no
      filtro escolhido. Nº de série: acha por qualquer parte, ignorando
@@ -840,7 +845,7 @@ function vLista(){
     +'</div>';
   h+='<label class="sub" style="display:flex;gap:8px;align-items:center;margin:-6px 0 10px;"><input type="checkbox" style="width:18px;height:18px;"'+(lerLocal('telaAcesa')?' checked':'')+' onchange="telaAcesa(this.checked)"/> 🔔 Alertas ligados · manter a tela acesa (com a tela apagada o aviso não toca)</label>';
   h+='<input class="search" id="busca" placeholder="Buscar por nº da OS, cliente, telefone, modelo, nº de série…" value="'+esc(S.busca)+'" oninput="S.busca=this.value;S._focoBusca=true;render()"/>';
-  h+='<div class="chips">'+FILTROS.map(function(x){
+  h+='<div class="chips">'+CHIPS.map(function(x){
     var n=S.os.filter(x.f).length;
     return'<button class="chip'+(S.filtro===x.k?' on':'')+'" onclick="S.filtro=\''+x.k+'\';render()">'+esc(x.et?rotuloEtapa(x.et):x.l)+'<b>'+n+'</b></button>';
   }).join('')+'</div>';
@@ -859,7 +864,8 @@ function vLista(){
       g.forEach(function(o){h+=cardOS(o,true);});
     });
   }
-  if(S.filtro==='abertas'&&!q&&list.length){
+  if(S.filtro==='minhas'&&ehManutencao()&&!q&&list.length)grupos(ETAPAS.filter(function(e){return DONO[e.k]===S.setor;}));
+  else if(S.filtro==='abertas'&&!q&&list.length){
     var meu=ETAPAS.filter(function(e){return DONO[e.k]===S.setor;}),dele=ETAPAS.filter(function(e){return doOutro(e.k);});
     var nMeu=list.filter(function(o){return DONO[o.etapa]===S.setor;}).length;
     h+='<div class="lado">Com você — '+SETORES[S.setor]+'</div>';
