@@ -1621,10 +1621,18 @@ function acoesHtml(o){
       +'<button class="btn btn-p btn-lg" onclick="receberDoTecnico(\''+id+'\')">📥 Recebi do técnico</button>';break;
     case'recebido':b='<button class="btn btn-p btn-lg" onclick="iniciarOrc(\''+id+'\')">🔧 Iniciar orçamento</button>';break;
     case'em_orcamento':b='<button class="btn btn-p btn-lg" onclick="finalizarOrc(\''+id+'\')">📋 Finalizar orçamento</button>';break;
-    case'aguardando_preco':b='<div class="info">A manutenção terminou o orçamento técnico. Monte o preço no Bling e envie ao cliente.'
-      +(o.estacionamento&&o.estacionamento.pagou?'<br>🅿️ <b>Acrescente o estacionamento de '+money(o.estacionamento.valor)+'</b> pago na retirada.':'')
-      +(o.blingId?'<br><b>Ao mudar a OS para "Orçada" no Bling, o app passa sozinho para "Aguardando aprovação"</b> (em até 3 minutos).':'')+'</div>'
-      +'<button class="btn '+(o.blingId?'btn-g':'btn-p btn-lg')+'" onclick="orcamentoEnviado(\''+id+'\')">📤 '+(o.blingId?'Registrar envio manualmente':'Orçamento enviado ao cliente')+'</button>';break;
+    case'aguardando_preco':
+      /* Deixar claro: o orçamento técnico já está pronto; falta o comercial
+         enviar ao cliente. Passo a passo + um botão grande. */
+      b='<div class="card" style="border:2px solid var(--amber);background:#fffbeb;margin-bottom:10px;">'
+        +'<div style="font-size:16px;font-weight:800;margin-bottom:4px;">✅ Orçamento técnico pronto</div>'
+        +'<div style="font-size:15px;font-weight:700;color:var(--amber);margin-bottom:10px;">⏳ Falta enviar ao cliente</div>'
+        +'<div style="font-size:14px;line-height:1.6;">'
+        +'<b>1.</b> Monte o preço na OS do Bling'+(o.estacionamento&&o.estacionamento.pagou?' — 🅿️ <b>acrescente o estacionamento de '+money(o.estacionamento.valor)+'</b>':'')+'.<br>'
+        +'<b>2.</b> Envie o orçamento ao cliente.<br>'
+        +'<b>3.</b> '+(o.blingId?'Mude a OS para <b>"Orçada"</b> no Bling — o app passa sozinho para "Aguardando aprovação" em até 3 min. Ou toque no botão abaixo.':'Toque no botão abaixo.')
+        +'</div></div>'
+        +'<button class="btn btn-p btn-lg" onclick="orcamentoEnviado(\''+id+'\')">📤 Já enviei o orçamento ao cliente</button>';break;
     case'aguardando_aprovacao':b='<div class="info">'+(o.importado&&o.importado.situacaoBling&&o.tempos.informado&&o.tempos.informado===o.importado.em?'Orçamento passado ao cliente antes do app (importada do Bling). Aguardando a resposta.':o.tempos.informado?'Cliente informado em '+fmtDH(o.tempos.informado)+'. Aguardando a resposta.':'Passe o orçamento ao cliente e registre.')+'<br>'+contaCliente(o)
       +(o.prazos&&o.prazos.entrega?'<br>Previsão de término: <b>'+fmtData(o.prazos.entrega)+'</b>':'')+'</div>'
       +(o.tempos.informado?'':'<button class="btn btn-p btn-lg" style="margin-bottom:8px;" onclick="clienteInformado(\''+id+'\')">📞 Orçamento passado ao cliente</button>')
