@@ -423,6 +423,9 @@ function statusReg(id){
 }
 function renderLista(){
   if(!S.tecnico||!S.perfil)return renderQuem();
+  /* Redesenhar a lista (a cada técnico marcado, o banco avisa e ela é
+     refeita) não pode mandar a página de volta ao topo. */
+  var rolagem=window.scrollY;
   $('top').innerHTML='<h1>🚚 Entregas</h1>'+whoBtn();
   var dl=datasDaLista();
   if(S.filtro!=='feitas'&&!dl.cont[S.filtro])S.filtro=dataPadrao(dl.datas);
@@ -442,9 +445,10 @@ function renderLista(){
   var on=document.querySelector('#chips-datas .chip.on');
   if(on){var box=$('chips-datas');box.scrollLeft=on.offsetLeft-box.offsetLeft-8;}
   desenharItens();
+  if(rolagem)window.scrollTo(0,rolagem);
 }
-function filtrar(f){S.filtro=f;renderLista();}
-function mudarVisao(v){S.visao=v;S.kbSel=null;lsSet('campo_visao',v);renderLista();}
+function filtrar(f){S.filtro=f;renderLista();window.scrollTo(0,0);}
+function mudarVisao(v){S.visao=v;S.kbSel=null;lsSet('campo_visao',v);renderLista();window.scrollTo(0,0);}
 function escolherAba(i){S.aba=i==='todos'?'':i==='sem'?'__sem':S.tecsRua[i];desenharItens();}
 /* Uma aba por técnico na data escolhida, com a quantidade de entregas dele. */
 function abasHtml(doDia){
@@ -458,6 +462,10 @@ function abasHtml(doDia){
 }
 function desenharItens(){
   var el=$('itens');if(!el)return;
+  var rolagem=window.scrollY;
+  try{desenharItens2(el);}finally{if(rolagem&&Math.abs(window.scrollY-rolagem)>2)window.scrollTo(0,rolagem);}
+}
+function desenharItens2(el){
   var lista=(S.lista||[]).slice(),q=semAcento(S.busca),busca=!!q;
   if(busca){
     /* Busca procura em todas as datas, não só na escolhida. */
