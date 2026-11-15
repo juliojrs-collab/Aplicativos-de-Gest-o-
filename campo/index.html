@@ -82,6 +82,12 @@ body.largo main{max-width:none;}
 .chip.on{border-color:var(--blue);background:var(--blue-light);color:var(--blue-dark);}
 .search{width:100%;border:1px solid var(--border2);border-radius:var(--r2);padding:11px 12px;font-size:16px;margin-bottom:10px;background:#fff;}
 .os{display:flex;gap:12px;align-items:flex-start;cursor:pointer;}
+.os.feito,.kb-c.feito{background:#e3f6ec;border-left:5px solid var(--green);}
+.os.feito .os-num,.kb-c.feito .t{color:#046c4e;}
+.mdl-ov{position:fixed;inset:0;z-index:70;background:rgba(17,24,39,.55);display:flex;align-items:flex-end;justify-content:center;}
+@media(min-width:700px){.mdl-ov{align-items:center;}}
+.mdl-ov .card{width:100%;max-width:480px;margin:0;border-radius:16px 16px 0 0;padding:18px 16px calc(18px + env(safe-area-inset-bottom));}
+@media(min-width:700px){.mdl-ov .card{border-radius:16px;}}
 .os-num{font-weight:800;font-size:15px;min-width:58px;color:var(--blue-dark);}
 .os-main{flex:1;min-width:0;}
 .os-main .t{font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
@@ -414,11 +420,13 @@ function itensResumo(o){
   return'<div class="its-l">'+h+'</div>';
 }
 function idsAssinados(){return Object.keys(S.reg).filter(function(id){return!!S.reg[id].assinatura;});}
+/* Concluído = relatório gerado (o cliente assinou). */
+function concluido(id){var r=S.reg[String(id)];return!!(r&&r.assinatura);}
 function statusReg(id){
   var r=S.reg[String(id)];
   if(!r)return'';
-  if(r.envio&&r.envio.ok)return'<span class="badge b-green">✔ Enviado</span>';
-  if(r.assinatura)return'<span class="badge b-amber">Assinado · não enviado</span>';
+  if(r.envio&&r.envio.ok)return'<span class="badge b-green">✔ Concluído · enviado</span>';
+  if(r.assinatura)return'<span class="badge b-green">✔ Concluído</span> <span class="badge b-amber">WhatsApp não enviado</span>';
   return'<span class="badge b-gray">Em atendimento</span>';
 }
 function renderLista(){
@@ -501,7 +509,7 @@ function desenharItens2(el){
   }
   el.innerHTML=topo+lista.map(function(o){
     var d=prev(o);
-    return'<div class="card os" onclick="abrirPedido('+o.id+')">'
+    return'<div class="card os'+(concluido(o.id)?' feito':'')+'" onclick="abrirPedido('+o.id+')">'
       +'<div class="os-num">'+(o._rota&&S.aba?'<div class="ord">'+o._rota.n+'º</div><div class="sub">'+esc(o._rota.h)+'</div>':'')+esc(o.numero||'s/ nº')+'</div>'
       +'<div class="os-main"><div class="t">'+esc(o.cliente||'Cliente')+'</div>'
       +'<div class="s">'+(o.total?money(o.total):'')+((busca||S.filtro==='feitas')&&d?' · entrega '+fmtData(d):'')+'</div>'
@@ -513,16 +521,55 @@ function desenharItens2(el){
   }).join('');
 }
 
+/* ═══ Adiar a entrega ════════════════════════════════════════════════════
+   Muda a data prevista do pedido no Bling (o servidor anota nas observações
+   internas quem adiou e por quê) e guarda o histórico em campo_atribuicoes. */
+function pedidoDaLista(id){return(S.lista||[]).filter(function(x){return String(x.id)===String(id);})[0]||(S.ped&&String(S.ped.id)===String(id)?S.ped:null);}
+function adiarPedido(id){
+  var o=pedidoDaLista(id)||{id:id},atual=prev(o)||'';
+  var base=atual&&atual>(S.hoje||hojeISO())?atual:(S.hoje||hojeISO());
+  function mais(d,n){var x=new Date(d+'T12:00:00');x.setDate(x.getDate()+n);return x.getFullYear()+'-'+pad(x.getMonth()+1)+'-'+pad(x.getDate());}
+  var amanha=mais(S.hoje||hojeISO(),1),ops=[[amanha,'Amanhã'],[mais(S.hoje||hojeISO(),2),'Depois de amanhã'],[mais(base,7),'+1 semana']];
+  var ov=document.createElement('div');ov.className='mdl-ov';ov.id='adiar-ov';
+  ov.onclick=function(e){if(e.target===ov)ov.remove();};
+  ov.innerHTML='<div class="card"><h3>📅 Adiar entrega · pedido '+esc(o.numero||'')+'</h3>'
+    +'<div class="sub" style="margin-bottom:10px;">'+esc(o.cliente&&o.cliente.nome||o.cliente||'')+' · entrega prevista para <b>'+(atual?fmtData(atual):'sem data')+'</b>. A nova data também é gravada no Bling.</div>'
+    +'<div class="chips" style="flex-wrap:wrap;">'+ops.map(function(x){return'<button class="chip" onclick="$(\'ad-data\').value=\''+x[0]+'\'">'+x[1]+' ('+fmtData(x[0]).slice(0,5)+')</button>';}).join('')+'</div>'
+    +'<div class="field"><label>Nova data de entrega <span class="req">*</span></label><input type="date" id="ad-data" min="'+amanha+'" value="'+amanha+'"/></div>'
+    +'<div class="field"><label>Motivo <span class="req">*</span></label><textarea id="ad-motivo" rows="2" placeholder="Ex.: cliente pediu para outro dia, não havia ninguém no local…"></textarea></div>'
+    +'<div class="actions"><button class="btn btn-g" onclick="$(\'adiar-ov\').remove()">Cancelar</button><button class="btn btn-p" id="ad-ok" onclick="confirmarAdiar('+id+')">Adiar entrega</button></div></div>';
+  document.body.appendChild(ov);
+}
+async function confirmarAdiar(id){
+  var data=val('ad-data'),motivo=val('ad-motivo'),o=pedidoDaLista(id)||{},de=prev(o)||'';
+  if(!/^\d{4}-\d{2}-\d{2}$/.test(data)){toast('Escolha a nova data');return;}
+  if(data<=(S.hoje||hojeISO())){toast('Escolha uma data a partir de amanhã');return;}
+  if(!motivo){toast('Escreva o motivo');$('ad-motivo').focus();return;}
+  var b=$('ad-ok');b.disabled=true;b.innerHTML='<span class="spin"></span> Gravando no Bling…';
+  try{
+    await api('/api/bling/campo/pedidos/'+id+'/data',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({data:data,motivo:motivo,por:S.tecnico})});
+  }catch(e){b.disabled=false;b.textContent='Adiar entrega';alert('Não foi possível adiar:\n\n'+e.message);return;}
+  var k=String(id),reg={de:de,para:data,motivo:motivo,por:S.tecnico,em:Date.now()};
+  S.atr[k]=Object.assign({},S.atr[k]||{});S.atr[k].adiamentos=(S.atr[k].adiamentos||[]).concat([reg]);S.atr[k].dataPrevista=data;
+  db.collection(C_ATR).doc(k).set({adiamentos:firebase.firestore.FieldValue.arrayUnion(reg),dataPrevista:data,numero:o.numero||'',em:Date.now()},{merge:true}).catch(function(){});
+  if(o)o.dataPrevista=data;
+  if(S.ped&&String(S.ped.id)===k)S.ped.dataPrevista=data;
+  lsSet('campo_lista',JSON.stringify({em:Date.now(),hoje:S.hoje,lista:S.lista}));
+  var ov=$('adiar-ov');if(ov)ov.remove();
+  toast('Entrega adiada para '+fmtData(data)+' ✔');
+  if(S.tela==='ped')renderPedido();else if(S.tela==='lista')desenharItens();else render();
+}
+
 /* ═══ Quadro do comercial ════════════════════════════════════════════════
    Coluna "A distribuir" (pedidos da data sem técnico) e uma coluna por
    técnico de rua. No computador, arrasta o pedido; no celular, toca no
    pedido e depois na coluna. Cada coluna monta ou mostra a rota do técnico. */
 function kbCard(o){
-  return'<div class="kb-c'+(S.kbSel===o.id?' sel':'')+'" draggable="true" data-id="'+o.id+'" ondragstart="kbDrag(event,'+o.id+')" onclick="kbClique(event,'+o.id+')">'
+  return'<div class="kb-c'+(S.kbSel===o.id?' sel':'')+(concluido(o.id)?' feito':'')+'" draggable="true" data-id="'+o.id+'" ondragstart="kbDrag(event,'+o.id+')" onclick="kbClique(event,'+o.id+')">'
     +'<div class="t">'+(o._rota?'<span class="ord" style="font-size:11px;">'+o._rota.n+'º '+esc(o._rota.h)+'</span> ':'')+esc(o.numero)+' · '+esc(o.cliente||'Cliente')+'</div>'
     +itensResumo(o)
     +tempoHtml(o)
-    +'<div class="x"><span>'+(o.vendedor?esc(o.vendedor):'')+(o.total?' · '+money(o.total):'')+'</span><a href="#" onclick="event.stopPropagation();event.preventDefault();abrirPedido('+o.id+')">abrir</a></div>'
+    +'<div class="x"><span>'+(o.vendedor?esc(o.vendedor):'')+(o.total?' · '+money(o.total):'')+'</span><span>'+(concluido(o.id)?'':'<a href="#" onclick="event.stopPropagation();event.preventDefault();adiarPedido('+o.id+')">adiar</a> · ')+'<a href="#" onclick="event.stopPropagation();event.preventDefault();abrirPedido('+o.id+')">abrir</a></span></div>'
     +'<div class="badges">'+statusReg(o.id)+'</div></div>';
 }
 function quadroHtml(dia,doDia){
@@ -696,7 +743,7 @@ function renderRota(){
   h+='<div class="card">'+r.ordem.map(function(p,i){
     var jan=p.janela?(p.janela.nota||((p.janela.inicio?'a partir de '+p.janela.inicio:'')+(p.janela.fim?' até '+p.janela.fim:''))):'';
     return'<div class="st" style="'+(i?'border-top:1px solid var(--border);padding-top:10px;margin-top:10px;':'')+'">'
-      +'<div class="n"'+(p.atrasado?' style="background:var(--red)"':'')+'>'+(i+1)+'</div>'
+      +'<div class="n"'+(concluido(p.id)?' style="background:var(--green)" title="Concluído"':p.atrasado?' style="background:var(--red)"':'')+'>'+(concluido(p.id)?'✓':(i+1))+'</div>'
       +'<div class="m"><div><b>'+esc(p.cliente||'Cliente')+'</b> <span class="sub">· pedido '+esc(p.numero)+'</span></div>'
       +'<div class="sub">'+esc(p.endereco||'')+'</div>'
       +(r.alterada?'':'<div style="font-size:13px;margin-top:2px;">Chegada prevista <b>'+esc(p.chegada)+'</b>'+(p.tempo?' <span class="sub">· serviço ~'+fmtTempo(p.tempo)+'</span>':'')+(p.espera>=10?' <span class="sub">(espera '+p.espera+' min pelo horário do cliente)</span>':'')+'</div>')
@@ -802,7 +849,8 @@ function renderPedido(){
   /* O pedido */
   h+='<div class="card"><div class="sec">Pedido</div><dl class="kv">'
     +(o.data?'<dt>Data</dt><dd>'+fmtData(o.data)+'</dd>':'')
-    +(o.dataPrevista?'<dt>Entrega</dt><dd><b>'+fmtData(o.dataPrevista)+'</b></dd>':'')
+    +(o.dataPrevista?'<dt>Entrega</dt><dd><b>'+fmtData(o.dataPrevista)+'</b>'+(concluido(o.id)?'':' <button class="btn btn-g btn-sm" style="margin-left:6px;" onclick="adiarPedido('+o.id+')">📅 Adiar entrega</button>')+'</dd>':'')
+    +((S.atr[String(o.id)]||{}).adiamentos||[]).map(function(a){return'<dt>Adiada</dt><dd class="sub">de '+fmtData(a.de)+' para '+fmtData(a.para)+' por '+esc(a.por||'-')+' em '+fmtDH(a.em)+': '+esc(a.motivo)+'</dd>';}).join('')
     
     +(o.vendedor?'<dt>Vendedor</dt><dd>'+esc(o.vendedor)+'</dd>':'')
     +(tecDe(o.id)?'<dt>Técnico</dt><dd>'+esc(tecDe(o.id))+'</dd>':'')
