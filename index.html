@@ -2288,14 +2288,44 @@ async function relatorioEntrada(id){
   }catch(e){alert('Erro ao gerar o relatório: '+e.message);return;}
   var podeCompartilhar=false;
   try{podeCompartilhar=!!(navigator.canShare&&navigator.canShare({files:[new File([_rel.blob],_rel.nome,{type:'application/pdf'})]}));}catch(e){}
+  var c=o.cliente||{},env=o.relatorioEnviado;
   modal('Relatório de entrada',
-    '<div class="info">Relatório da '+esc(osLabel(o))+' pronto.'+(podeCompartilhar?' Toque em "Enviar" e escolha o WhatsApp do cliente.':' Baixe o PDF e envie pelo WhatsApp Web.')+'</div>'
-    +'<div class="actions">'
-    +(podeCompartilhar?'<button class="btn btn-ok" onclick="compartilharRel()">📤 Enviar (WhatsApp…)</button>':'')
+    '<div class="info">Relatório da '+esc(osLabel(o))+' pronto.</div>'
+    +(o.blingId?'<div class="field"><label>Celular do cliente</label><input id="rel-tel" inputmode="tel" value="'+esc(c.telefone||'')+'" placeholder="Vazio = celular do cadastro no Bling"/>'
+      +'<div class="hint">Precisa ser um número do cadastro do cliente no Bling.</div></div>'
+      +'<button class="btn btn-ok btn-lg" id="rel-wa" onclick="enviarRelWhatsApp()">📲 Enviar ao cliente (WhatsApp da Purific)</button>'
+      +(env?'<div class="sub" style="margin-top:6px;">Já enviado em '+fmtDH(env.em)+' para '+esc(env.telefone||'')+(env.por?' · '+esc(env.por):'')+'</div>':'')
+      +'<div id="rel-st" style="margin-top:8px;"></div>'
+      :'<div class="err">Esta OS não está ligada ao Bling, então não dá para enviar pelo WhatsApp da Purific. Use "Abrir esta OS no Bling" ou envie pelo seu celular.</div>')
+    +'<div class="sec">Outras opções</div><div class="actions">'
+    +(podeCompartilhar?'<button class="btn btn-g" onclick="compartilharRel()">📤 Pelo meu celular</button>':'')
     +'<button class="btn btn-g" onclick="baixarRel()">⬇ Baixar PDF</button>'
     +'<button class="btn btn-g" onclick="abrirRel()">👁 Ver</button></div>'
     +'<div class="actions"><button class="btn btn-g" onclick="voltarDetalhe()">Voltar à OS</button></div>');
   S.modo='passo';
+}
+/* Envia o PDF pelo WhatsApp oficial da Purific (servidor), para o celular do
+   cliente que está no cadastro do Bling. Fica registrado na OS e no CRM. */
+function blobBase64(b){return new Promise(function(ok,fail){var r=new FileReader();r.onload=function(){ok(r.result);};r.onerror=function(){fail(new Error('Não consegui ler o PDF'));};r.readAsDataURL(b);});}
+async function enviarRelWhatsApp(){
+  if(!_rel)return;
+  var o=getOS(_rel.o.id)||_rel.o,btn=$('rel-wa'),st=$('rel-st');
+  if(!o.blingId)return;
+  if(o.relatorioEnviado&&!confirm('Este relatório já foi enviado em '+fmtDH(o.relatorioEnviado.em)+'. Enviar de novo?'))return;
+  btn.disabled=true;btn.textContent='Enviando…';st.innerHTML='';
+  try{
+    var por=ehComercial()?(lerLocal('comercial')||lerLocal('atendente')):ehExterno()?lerLocal('tecExterno'):lerLocal('tecnico');
+    var r=await fetch(API+'/api/bling/os/'+o.blingId+'/enviar-relatorio',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({pdf:await blobBase64(_rel.blob),arquivo:_rel.nome,telefone:val('rel-tel'),por:por})});
+    var j=await r.json().catch(function(){return{};});
+    if(!r.ok)throw new Error(j.error||('HTTP '+r.status));
+    await db.collection(C_OS).doc(o.id).update({relatorioEnviado:{em:Date.now(),telefone:j.telefone||'',por:por||'',via:j.via||''}});
+    st.innerHTML='<div class="info">✅ Enviado pelo WhatsApp da Purific para '+esc(j.telefone||'')+'.</div>';
+    btn.textContent='Enviado';toast('Relatório enviado ao cliente');
+  }catch(e){
+    btn.disabled=false;btn.textContent='📲 Enviar ao cliente (WhatsApp da Purific)';
+    st.innerHTML='<div class="err">Não foi enviado: '+esc(e.message)+'</div>';
+  }
 }
 function compartilharRel(){
   if(!_rel)return;
