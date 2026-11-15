@@ -1630,7 +1630,7 @@ function acoesHtml(o){
         +'<div style="font-size:14px;line-height:1.6;">'
         +'<b>1.</b> Monte o preço na OS do Bling'+(o.estacionamento&&o.estacionamento.pagou?' — 🅿️ <b>acrescente o estacionamento de '+money(o.estacionamento.valor)+'</b>':'')+'.<br>'
         +'<b>2.</b> Envie o orçamento ao cliente.<br>'
-        +'<b>3.</b> '+(o.blingId?'Mude a OS para <b>"Orçada"</b> no Bling — o app passa sozinho para "Aguardando aprovação" em até 3 min. Ou toque no botão abaixo.':'Toque no botão abaixo.')
+        +'<b>3.</b> Avise que enviou: toque em <b>"Já enviei o orçamento ao cliente"</b>'+(o.blingId?', ou mude a OS para <b>"Orçada"</b> no Bling, que o app avança sozinho.':'.')
         +'</div></div>'
         +'<button class="btn btn-p btn-lg" onclick="orcamentoEnviado(\''+id+'\')">📤 Já enviei o orçamento ao cliente</button>';break;
     case'aguardando_aprovacao':b='<div class="info">'+(o.importado&&o.importado.situacaoBling&&o.tempos.informado&&o.tempos.informado===o.importado.em?'Orçamento passado ao cliente antes do app (importada do Bling). Aguardando a resposta.':o.tempos.informado?'Cliente informado em '+fmtDH(o.tempos.informado)+'. Aguardando a resposta.':'Passe o orçamento ao cliente e registre.')+'<br>'+contaCliente(o)
