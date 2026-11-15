@@ -837,7 +837,9 @@ function vLista(){
   /* Com texto na busca, procura em todas as OS (também entregues), não só no
      filtro escolhido. Nº de série: acha por qualquer parte, ignorando
      espaços, traços e pontos. */
-  var list=(q?S.os:S.os.filter(fil.f)).filter(function(o){return casaBusca(o,q);});
+  /* Filtro por vendedor responsável: vale junto com as abas e a busca. */
+  var vend=ehComercial()&&S.vend||'',doVend=function(o){return!vend||(o.atendente||'')===vend;};
+  var list=(q?S.os:S.os.filter(fil.f)).filter(function(o){return casaBusca(o,q)&&doVend(o);});
   var minhas=S.os.filter(function(o){return DONO[o.etapa]===S.setor;}).length;
   var h='<div class="ph"><div><h2>Ordens de serviço · '+SETORES[S.setor]+'</h2><p class="sub"><b>'+minhas+' com você</b> · '+S.os.filter(FILTROS[0].f).length+' abertas · '+S.os.length+' no total</p></div>'
     /* Botão "Importar do Bling" fora da tela a pedido da loja (começaram do
@@ -845,8 +847,14 @@ function vLista(){
     +'</div>';
   h+='<label class="sub" style="display:flex;gap:8px;align-items:center;margin:-6px 0 10px;"><input type="checkbox" style="width:18px;height:18px;"'+(lerLocal('telaAcesa')?' checked':'')+' onchange="telaAcesa(this.checked)"/> 🔔 Alertas ligados · manter a tela acesa (com a tela apagada o aviso não toca)</label>';
   h+='<input class="search" id="busca" placeholder="Buscar por nº da OS, cliente, telefone, modelo, nº de série…" value="'+esc(S.busca)+'" oninput="S.busca=this.value;S._focoBusca=true;render()"/>';
+  var nomesV={};S.os.forEach(function(o){if(o.atendente&&o.etapa!=='entregue')nomesV[o.atendente]=(nomesV[o.atendente]||0)+1;});
+  if(vend&&!nomesV[vend])nomesV[vend]=0;
+  if(ehComercial())h+='<div style="display:flex;gap:8px;align-items:center;margin:-4px 0 10px;"><label class="sub" for="f-vend" style="white-space:nowrap">👤 Vendedor</label>'
+    +'<select id="f-vend" class="search" style="margin:0;padding:8px 10px;font-size:14px;'+(vend?'border-color:var(--blue);background:var(--blue-light);':'')+'" onchange="S.vend=this.value;render()">'
+    +'<option value="">Todos</option>'+Object.keys(nomesV).sort().map(function(n){return'<option value="'+esc(n)+'"'+(n===vend?' selected':'')+'>'+esc(nomeCurto(n))+' ('+nomesV[n]+')</option>';}).join('')
+    +'</select></div>';
   h+='<div class="chips">'+CHIPS.map(function(x){
-    var n=S.os.filter(x.f).length;
+    var n=S.os.filter(function(o){return x.f(o)&&doVend(o);}).length;
     return'<button class="chip'+(S.filtro===x.k?' on':'')+'" onclick="S.filtro=\''+x.k+'\';render()">'+esc(x.et?rotuloEtapa(x.et):x.l)+'<b>'+n+'</b></button>';
   }).join('')+'</div>';
   if(q)h+='<div class="sub" style="margin:-4px 0 10px;">'+list.length+' resultado'+(list.length===1?'':'s')+' em todas as OS (inclui as entregues)</div>';
