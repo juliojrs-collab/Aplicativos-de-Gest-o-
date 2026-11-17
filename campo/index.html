@@ -657,8 +657,22 @@ var CATEGORIAS=[
    conta uma vez no serviço principal de cada um (no FC: instalação › carga).
    Ex.: instalação purificador + instalação FC conta 1 em cada coluna. */
 var CAT_FC=['inst_fc','carga_fc'];
+/* Carga de filtro central é Carga FC, nunca troca de refil: se o técnico marcou
+   "Troca de refil" e o pedido tem carga de FC, conta como Carga FC (o refil só
+   continua se o pedido também tiver outro refil/elemento). */
+var RE_CARGA_FC=/CARGA\s+(DE\s+)?(FILTRO\s+CENTRAL|FC)\b/i,RE_REFIL=/REFIL|ELEMENTO|CARBON|CARV[AÃ]O|\bPP\b|\bVELA/i;
+function itensDe(r){return((r&&r.pedido&&r.pedido.itens)||[]).map(function(i){return String(i.descricao||'');});}
+function temCargaFc(r){return itensDe(r).some(function(d){return RE_CARGA_FC.test(d);});}
+function tiposContagem(r){
+  var t=tiposDe(r).slice(),i=t.indexOf('refil');
+  if(i>=0&&temCargaFc(r)){
+    if(t.indexOf('carga_fc')<0)t.push('carga_fc');
+    if(!itensDe(r).some(function(d){return!RE_CARGA_FC.test(d)&&RE_REFIL.test(d);}))t.splice(t.indexOf('refil'),1);
+  }
+  return t;
+}
 function categoriasDe(r){
-  var t=tiposDe(r),out=[];
+  var t=tiposContagem(r),out=[];
   [CATEGORIAS.filter(function(c){return CAT_FC.indexOf(c.k)<0;}),CATEGORIAS.filter(function(c){return CAT_FC.indexOf(c.k)>=0;})]
     .forEach(function(grupo){for(var i=0;i<grupo.length;i++)if(t.indexOf(grupo[i].k)>=0){out.push(grupo[i].k);return;}});
   return out.length?out:['_sem'];
@@ -1150,6 +1164,7 @@ function tiposHtml(r,trava){
   var t=tiposDe(r),dis=trava?' disabled':'';
   return'<div class="field" id="tipos"><label>Tipo de serviço <span class="req">*</span> <span class="sub">(pode marcar mais de um)</span></label><div class="opts">'
     +TIPOS.map(function(x){return'<button type="button" class="chip'+(t.indexOf(x.k)>=0?' on':'')+'"'+dis+' onclick="tipoSel(\''+x.k+'\')">'+(t.indexOf(x.k)>=0?'✔ ':'')+esc(x.l)+'</button>';}).join('')+'</div>'
+    +(!trava&&t.indexOf('carga_fc')<0&&temCargaFc({pedido:S.ped})?'<div class="info" style="margin-top:6px;">💧 Este pedido tem <b>carga de filtro central</b>: marque <b>Carga FC</b> (não é troca de refil).</div>':'')
     +(t.indexOf('outro')>=0?'<input id="tipo-outro" placeholder="Qual serviço? *" style="margin-top:6px;font-size:14px;" value="'+esc(r.tipoOutro||'')+'"'+dis+' onchange="salvarCampos()"/>':'')+'</div>';
 }
 /* Marca/desmarca um tipo e redesenha (as perguntas mudam com o tipo). */
