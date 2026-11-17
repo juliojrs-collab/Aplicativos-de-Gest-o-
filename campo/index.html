@@ -84,6 +84,12 @@ body.largo main{max-width:none;}
 .os{display:flex;gap:12px;align-items:flex-start;cursor:pointer;}
 .os.feito,.kb-c.feito{background:#e3f6ec;border-left:5px solid var(--green);}
 .os.feito .os-num,.kb-c.feito .t{color:#046c4e;}
+.rel-t{width:100%;border-collapse:collapse;font-size:13px;}
+.rel-t th,.rel-t td{padding:8px 6px;border-bottom:1px solid var(--border);text-align:center;}
+.rel-t th{font-size:11px;color:var(--text2);text-transform:uppercase;}
+.rel-t td:first-child,.rel-t th:first-child{text-align:left;font-weight:700;}
+.rel-t tr.tot td{font-weight:800;background:var(--blue-light);}
+.rel-t td.z{color:var(--text3);}
 .mdl-ov{position:fixed;inset:0;z-index:70;background:rgba(17,24,39,.55);display:flex;align-items:flex-end;justify-content:center;}
 @media(min-width:700px){.mdl-ov{align-items:center;}}
 .mdl-ov .card{width:100%;max-width:480px;margin:0;border-radius:16px 16px 0 0;padding:18px 16px calc(18px + env(safe-area-inset-bottom));}
@@ -300,6 +306,7 @@ function render(){
   if(!S.tecnico||!S.perfil||S.tela==='quem')return renderQuem();
   if(S.tela==='ped')return renderPedido();
   if(S.tela==='rota')return renderRota();
+  if(S.tela==='rel')return renderRelatorio();
   renderLista();
 }
 
@@ -496,6 +503,7 @@ function renderLista(){
     +'</div><div class="chips" id="chips-tec"></div><div class="chips">'
     +'<button class="chip'+(S.filtro==='feitas'?' on':'')+'" onclick="filtrar(\'feitas\')">✍️ Assinados ('+idsAssinados().length+')</button>'
     +'<button class="chip" onclick="carregarLista()">'+(S.carregando?'<span class="spin"></span>':'↻')+' Atualizar</button>'
+    +(ehTec()?'':'<button class="chip" onclick="abrirRelatorio()">📊 Serviços por técnico</button>')
     +(ehTec()?'':'<a class="chip" style="text-decoration:none;" href="mapa/" target="_blank" rel="noopener">📍 Mapa dos técnicos</a>')+'</div>'
     +(ehTec()?'':'<div class="chips"><button class="chip'+(S.visao==='lista'?' on':'')+'" onclick="mudarVisao(\'lista\')">📋 Lista</button><button class="chip'+(S.visao==='quadro'?' on':'')+'" onclick="mudarVisao(\'quadro\')">🗂️ Quadro por técnico</button></div>');
   if(S.listaErr)h+='<div class="err">Não foi possível buscar os pedidos no Bling: '+esc(S.listaErr)+'</div>';
@@ -572,6 +580,87 @@ function desenharItens2(el){
       +'<div class="badges">'+(o._em?'<span class="badge b-gray">'+fmtDH(o._em)+'</span>':'')+statusReg(o.id)+'</div>'
       +atrHtml(o)+'</div></div>';
   }).join('');
+}
+
+/* ═══ Serviços por técnico (relatório do comercial) ════════════════════════
+   Conta os atendimentos concluídos (relatório assinado) no mês, por técnico
+   e por tipo de serviço. Um atendimento com dois tipos conta nos dois. */
+var REL={mes:''};
+function mesAtual(){var d=new Date();return d.getFullYear()+'-'+pad(d.getMonth()+1);}
+function mesMais(m,n){var p=m.split('-').map(Number),d=new Date(p[0],p[1]-1+n,1);return d.getFullYear()+'-'+pad(d.getMonth()+1);}
+var MESES_NOME=['janeiro','fevereiro','março','abril','maio','junho','julho','agosto','setembro','outubro','novembro','dezembro'];
+function nomeMes(m){var p=m.split('-');return MESES_NOME[Number(p[1])-1]+' de '+p[0];}
+function abrirRelatorio(){
+  document.body.classList.remove('largo');
+  S.tela='rel';history.pushState({rel:1},'');
+  REL.mes=REL.mes||mesAtual();carregarRelatorio();
+}
+function mudarMes(n){REL.mes=mesMais(REL.mes,n);carregarRelatorio();}
+async function carregarRelatorio(){
+  REL.carregando=true;REL.erro='';renderRelatorio();
+  var p=REL.mes.split('-').map(Number),ini=new Date(p[0],p[1]-1,1).getTime(),fim=new Date(p[0],p[1],1).getTime(),mes=REL.mes;
+  try{
+    var snap=await db.collection(C_REG).where('assinatura.em','>=',ini).where('assinatura.em','<',fim).get();
+    if(mes!==REL.mes)return;
+    REL.itens=snap.docs.map(function(d){var r=d.data();r.id=d.id;return r;})
+      .filter(function(r){return r.assinatura&&r.assinatura.em>=ini&&r.assinatura.em<fim;})
+      .sort(function(a,b){return a.assinatura.em-b.assinatura.em;});
+  }catch(e){REL.erro=e.message;REL.itens=[];}
+  REL.carregando=false;
+  if(S.tela==='rel')renderRelatorio();
+}
+/* Técnico do atendimento: o marcado para a entrega quando assinou; nos
+   registros antigos, o marcado no pedido ou quem preencheu. */
+function tecDoReg(r){return r.tecnicoEntrega||tecDe(r.id)||r.tecnico||'Sem técnico';}
+function tipoNome(k){return k==='outro'?'Outro':(TIPOS.filter(function(t){return t.k===k;})[0]||{l:k}).l;}
+function tabelaRel(){
+  var por={},tot={_n:0};
+  (REL.itens||[]).forEach(function(r){
+    var t=tecDoReg(r),l=por[t]=por[t]||{_n:0};l._n++;tot._n++;
+    var tipos=tiposDe(r);if(!tipos.length)tipos=['_sem'];
+    tipos.forEach(function(k){l[k]=(l[k]||0)+1;tot[k]=(tot[k]||0)+1;});
+  });
+  var cols=TIPOS.map(function(t){return t.k;});if(tot._sem)cols.push('_sem');
+  var nomes=S.tecsRua.slice();Object.keys(por).forEach(function(n){if(nomes.indexOf(n)<0)nomes.push(n);});
+  return{por:por,tot:tot,cols:cols,nomes:nomes};
+}
+function renderRelatorio(){
+  $('top').innerHTML='<button class="back" onclick="history.back()">‹</button><h1>📊 Serviços por técnico</h1>'+whoBtn();
+  var h='<div class="card"><div style="display:flex;align-items:center;gap:8px;justify-content:space-between;">'
+    +'<button class="btn btn-g btn-sm" onclick="mudarMes(-1)">‹ Anterior</button><b style="font-size:16px;text-transform:capitalize;">'+nomeMes(REL.mes)+'</b>'
+    +'<button class="btn btn-g btn-sm" onclick="mudarMes(1)"'+(REL.mes>=mesAtual()?' disabled':'')+'>Próximo ›</button></div>'
+    +'<div class="sub" style="margin-top:6px;">Atendimentos concluídos (relatório assinado) no mês. Um atendimento com mais de um serviço conta em cada um.</div></div>';
+  if(REL.carregando){$('app').innerHTML=h+'<div class="empty"><span class="spin"></span> Contando…</div>';return;}
+  if(REL.erro)h+='<div class="err">Não foi possível ler os atendimentos: '+esc(REL.erro)+'</div>';
+  var t=tabelaRel(),nomeCol=function(k){return k==='_sem'?'Sem tipo':tipoNome(k);};
+  h+='<div class="card tw"><table class="rel-t"><thead><tr><th>Técnico</th>'+t.cols.map(function(k){return'<th>'+esc(nomeCol(k))+'</th>';}).join('')+'<th>Atendimentos</th></tr></thead><tbody>'
+    +t.nomes.map(function(n){var l=t.por[n]||{_n:0};return'<tr><td>👷 '+esc(n)+'</td>'+t.cols.map(function(k){return'<td class="'+(l[k]?'':'z')+'">'+(l[k]||0)+'</td>';}).join('')+'<td><b>'+l._n+'</b></td></tr>';}).join('')
+    +'<tr class="tot"><td>Total</td>'+t.cols.map(function(k){return'<td>'+(t.tot[k]||0)+'</td>';}).join('')+'<td>'+t.tot._n+'</td></tr></tbody></table>'
+    +'<div class="actions"><button class="btn btn-g" onclick="baixarRelatorio()"'+((REL.itens||[]).length?'':' disabled')+'>⬇ Baixar planilha</button></div></div>';
+  if((REL.itens||[]).length){
+    h+='<div class="card"><div class="sec">Atendimentos do mês ('+REL.itens.length+')</div>'
+      +REL.itens.map(function(r){return'<div style="padding:8px 0;border-bottom:1px solid var(--border);cursor:pointer;" onclick="abrirPedido('+Number(r.id)+')">'
+        +'<b>'+esc(r.numero||'')+'</b> · '+esc(r.cliente||'')+' <span class="sub">· '+fmtDH(r.assinatura.em)+'</span>'
+        +'<div class="sub">👷 '+esc(tecDoReg(r))+' · '+esc(nomeTipos(r)||'sem tipo marcado')+'</div></div>';}).join('')+'</div>';
+  }else if(!REL.erro)h+='<div class="empty">Nenhum atendimento concluído em '+nomeMes(REL.mes)+'.</div>';
+  $('app').innerHTML=h;
+}
+/* Planilha (CSV, abre no Excel): o resumo e, abaixo, cada atendimento. */
+function baixarRelatorio(){
+  var t=tabelaRel(),q=function(v){return'"'+String(v==null?'':v).replace(/"/g,'""')+'"';},L=[];
+  var nomeCol=function(k){return k==='_sem'?'Sem tipo':tipoNome(k);};
+  L.push([q('Serviços por técnico — '+nomeMes(REL.mes))].join(';'));
+  L.push([q('Técnico')].concat(t.cols.map(function(k){return q(nomeCol(k));})).concat([q('Atendimentos')]).join(';'));
+  t.nomes.forEach(function(n){var l=t.por[n]||{_n:0};L.push([q(n)].concat(t.cols.map(function(k){return l[k]||0;})).concat([l._n]).join(';'));});
+  L.push([q('Total')].concat(t.cols.map(function(k){return t.tot[k]||0;})).concat([t.tot._n]).join(';'));
+  L.push('');L.push(['Data','Pedido','Cliente','Técnico','Serviços','Pagamento'].map(q).join(';'));
+  (REL.itens||[]).forEach(function(r){
+    var pg=r.pagamento||{},pag=pg.feito==='Sim'?(pg.forma||'')+(pg.parcelas&&pg.parcelas!=='À vista'?' '+pg.parcelas:''):pg.feito==='Não'?'Não pago no local':'';
+    L.push([fmtDH(r.assinatura.em),r.numero,r.cliente,tecDoReg(r),nomeTipos(r),pag].map(q).join(';'));
+  });
+  var blob=new Blob(['﻿'+L.join('\r\n')],{type:'text/csv;charset=utf-8'});
+  var a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='servicos-por-tecnico-'+REL.mes+'.csv';
+  document.body.appendChild(a);a.click();a.remove();setTimeout(function(){URL.revokeObjectURL(a.href);},5000);
 }
 
 /* ═══ Adiar a entrega ════════════════════════════════════════════════════
@@ -879,7 +968,7 @@ async function abrirPedido(id){
   if(S.tela==='ped'&&S.ped.id===id)renderPedido();
 }
 function voltar(){S.tela='lista';S.ped=null;render();}
-window.addEventListener('popstate',function(){if(S.tela==='ped'||S.tela==='rota')voltar();});
+window.addEventListener('popstate',function(){if(S.tela==='ped'||S.tela==='rota'||S.tela==='rel')voltar();});
 
 function renderPedido(){
   var o=S.ped||{},r=regAtual(),c=o.cliente||{};
@@ -1254,7 +1343,7 @@ async function confirmarAssin(){
   fecharAssin();
   /* Assinatura rápida: espera até 8s pelo GPS antes de gravar. */
   if(!LOCAL&&LOCAL_P){toast('Registrando localização…');await Promise.race([LOCAL_P,new Promise(function(ok){setTimeout(ok,8000);})]);}
-  await salvarCampos({assinatura:a,local:LOCAL||null}).catch(function(e){toast('Erro ao salvar: '+e.message);});
+  await salvarCampos({assinatura:a,local:LOCAL||null,tecnicoEntrega:tecDe(S.ped.id)||S.tecnico}).catch(function(e){toast('Erro ao salvar: '+e.message);});
   if(LOCAL)gravarLocal(LOCAL,LOCAL.em,'assinatura',{pedido:S.ped.numero||'',cliente:(S.ped.cliente&&S.ped.cliente.nome)||''});
   renderPedido();
   toast('Assinatura salva');
