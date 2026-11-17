@@ -209,21 +209,33 @@ function fotosDe(g){return S.midias.filter(function(m){return(m.grupo||'depois')
    impressas no PDF. A observação de cada uma é opcional. */
 /* Tipo de serviço, marcado pelo técnico (um ou mais). Define quais
    perguntas aparecem: "naoEm" tira a pergunta quando o tipo está marcado. */
-var TIPOS=[{k:'refil',l:'Troca de refil'},{k:'hig',l:'Higienização'},{k:'semagua',l:'Aparelho sem água'},{k:'instalacao',l:'Instalação nova'},{k:'visita',l:'Visita técnica'},{k:'outro',l:'Outro'}];
+var TIPOS=[{k:'refil',l:'Troca de refil'},{k:'hig',l:'Higienização'},{k:'semagua',l:'Aparelho sem água'},
+  {k:'inst_purif',l:'Instalação purificador'},{k:'inst_fc',l:'Instalação FC'},{k:'carga_fc',l:'Carga FC'},
+  {k:'visita',l:'Visita técnica'},{k:'outro',l:'Outro'}];
+/* "Instalação nova" (antes de separar purificador e FC) vale como instalação de purificador. */
+var TIPO_ANTIGO={instalacao:'inst_purif'};
+/* Serviços no filtro central ou de instalação: sem as perguntas do purificador em uso. */
+var SEM_PERGUNTAS_PURIF=['inst_purif','inst_fc','carga_fc'];
 var CHECK=[
-  {k:'higienizacao',p:'O aparelho precisa de higienização?',o:['Sim','Não','Feita neste atendimento'],obs:'Observação (opcional)',naoEm:['instalacao']},
+  {k:'higienizacao',p:'O aparelho precisa de higienização?',o:['Sim','Não','Feita neste atendimento'],obs:'Observação (opcional)',naoEm:SEM_PERGUNTAS_PURIF},
   {k:'pressao',p:'Qual a pressão do local?',valor:'kgf/cm²'},
-  {k:'mangueiras',p:'As mangueiras estão ressecadas ou foram trocadas há mais de um ano?',o:['Sim','Não','Trocadas neste atendimento','Não verificado'],obs:'Observação (opcional)',naoEm:['instalacao']}
+  {k:'mangueiras',p:'As mangueiras estão ressecadas ou foram trocadas há mais de um ano?',o:['Sim','Não','Trocadas neste atendimento','Não verificado'],obs:'Observação (opcional)',naoEm:SEM_PERGUNTAS_PURIF}
 ];
-function tiposDe(r){return(r&&r.tipos)||[];}
+function tiposDe(r){return((r&&r.tipos)||[]).map(function(k){return TIPO_ANTIGO[k]||k;});}
 /* Perguntas que valem para os tipos marcados. */
 function checkAtivo(tipos){return CHECK.filter(function(q){return!(q.naoEm||[]).some(function(t){return tipos.indexOf(t)>=0;});});}
 function nomeTipos(r){return tiposDe(r).map(function(k){return k==='outro'?(r.tipoOutro||'Outro'):(TIPOS.filter(function(t){return t.k===k;})[0]||{l:k}).l;}).join(', ');}
-/* Na instalação nova, "antes" é o local e "depois" é o aparelho instalado. */
+/* Na instalação, "antes" é o local e "depois" é o equipamento instalado; na
+   carga FC, o filtro antes e depois da carga. */
 function rotuloFoto(g,r){
-  var inst=tiposDe(r).indexOf('instalacao')>=0;
-  if(g==='antes')return inst?'Foto do local antes da instalação':'Foto do aparelho antes do serviço';
-  return inst?'Foto do aparelho instalado':'Foto do aparelho depois do serviço';
+  var t=tiposDe(r),ip=t.indexOf('inst_purif')>=0,ifc=t.indexOf('inst_fc')>=0;
+  if(ip||ifc){
+    if(g==='antes')return'Foto do local antes da instalação';
+    return'Foto do '+(ip&&ifc?'purificador e do filtro':ip?'purificador':'filtro')+' instalado'+(ip&&ifc?'s':'');
+  }
+  if(t.indexOf('carga_fc')>=0)return g==='antes'?'Foto do filtro antes da carga':'Foto do filtro depois da carga';
+  if(g==='antes')return'Foto do aparelho antes do serviço';
+  return'Foto do aparelho depois do serviço';
 }
 /* Pagamento na entrega: obrigatório dizer se foi feito e, se sim, a forma. */
 var FORMAS_PAG=['Pix','Crédito','Débito'],PARCELAS=['À vista','2x','3x','4x','5x','6x','7x','8x','9x','10x','11x','12x'];
@@ -594,10 +606,13 @@ function desenharItens2(el){
 /* ═══ Serviços por técnico (relatório do comercial) ════════════════════════
    Conta os atendimentos concluídos (relatório assinado) no mês, por técnico.
    Cada atendimento (um pedido, quase sempre um aparelho) conta uma vez só,
-   no serviço principal: instalação > higienização > sem água > visita técnica > refil > outro.
+   no serviço principal: instalação purificador > instalação FC > carga FC > higienização >
+   sem água > visita técnica > refil > outro.
    Ex.: refil + higienização conta como higienização, sem somar o refil. */
 var CATEGORIAS=[
-  {k:'instalacao',l:'Instalação'},
+  {k:'inst_purif',l:'Instalação purificador'},
+  {k:'inst_fc',l:'Instalação FC'},
+  {k:'carga_fc',l:'Carga FC'},
   {k:'hig',l:'Higienização'},
   {k:'semagua',l:'Aparelho sem água'},
   {k:'visita',l:'Visita técnica'},
@@ -652,7 +667,7 @@ function renderRelatorio(){
   var h='<div class="card"><div style="display:flex;align-items:center;gap:8px;justify-content:space-between;">'
     +'<button class="btn btn-g btn-sm" onclick="mudarMes(-1)">‹ Anterior</button><b style="font-size:16px;text-transform:capitalize;">'+nomeMes(REL.mes)+'</b>'
     +'<button class="btn btn-g btn-sm" onclick="mudarMes(1)"'+(REL.mes>=mesAtual()?' disabled':'')+'>Próximo ›</button></div>'
-    +'<div class="sub" style="margin-top:6px;">Atendimentos concluídos (relatório assinado) no mês. Cada atendimento conta uma vez, no serviço principal: instalação › higienização › aparelho sem água › visita técnica › troca/entrega de refil › outro. Ex.: refil + higienização conta só como higienização.</div></div>';
+    +'<div class="sub" style="margin-top:6px;">Atendimentos concluídos (relatório assinado) no mês. Cada atendimento conta uma vez, no serviço principal: instalação purificador › instalação FC › carga FC › higienização › aparelho sem água › visita técnica › troca/entrega de refil › outro. Ex.: refil + higienização conta só como higienização.</div></div>';
   if(REL.carregando){$('app').innerHTML=h+'<div class="empty"><span class="spin"></span> Contando…</div>';return;}
   if(REL.erro)h+='<div class="err">Não foi possível ler os atendimentos: '+esc(REL.erro)+'</div>';
   var t=tabelaRel(),nomeCol=tipoNome;
@@ -1075,7 +1090,7 @@ function tiposHtml(r,trava){
 }
 /* Marca/desmarca um tipo e redesenha (as perguntas mudam com o tipo). */
 function tipoSel(k){
-  var r=regAtual(),t=tiposDe(r).slice(),i=t.indexOf(k);
+  var r=regAtual(),t=tiposDe(r).slice(),i=t.indexOf(k); /* tiposDe já converte os tipos antigos */
   if(i>=0)t.splice(i,1);else t.push(k);
   var y=window.scrollY;
   salvarCampos({tipos:t});renderPedido();window.scrollTo(0,y);
