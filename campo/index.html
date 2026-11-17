@@ -583,8 +583,22 @@ function desenharItens2(el){
 }
 
 /* ═══ Serviços por técnico (relatório do comercial) ════════════════════════
-   Conta os atendimentos concluídos (relatório assinado) no mês, por técnico
-   e por tipo de serviço. Um atendimento com dois tipos conta nos dois. */
+   Conta os atendimentos concluídos (relatório assinado) no mês, por técnico.
+   Cada atendimento (um pedido, quase sempre um aparelho) conta uma vez só,
+   no serviço principal: instalação > higienização > sem água > refil > outro.
+   Ex.: refil + higienização conta como higienização, sem somar o refil. */
+var CATEGORIAS=[
+  {k:'instalacao',l:'Instalação'},
+  {k:'hig',l:'Higienização'},
+  {k:'semagua',l:'Aparelho sem água'},
+  {k:'refil',l:'Troca/entrega de refil'},
+  {k:'outro',l:'Outro'}
+];
+function categoriaDe(r){
+  var t=tiposDe(r);
+  for(var i=0;i<CATEGORIAS.length;i++)if(t.indexOf(CATEGORIAS[i].k)>=0)return CATEGORIAS[i].k;
+  return'_sem';
+}
 var REL={mes:''};
 function mesAtual(){var d=new Date();return d.getFullYear()+'-'+pad(d.getMonth()+1);}
 function mesMais(m,n){var p=m.split('-').map(Number),d=new Date(p[0],p[1]-1+n,1);return d.getFullYear()+'-'+pad(d.getMonth()+1);}
@@ -612,15 +626,14 @@ async function carregarRelatorio(){
 /* Técnico do atendimento: o marcado para a entrega quando assinou; nos
    registros antigos, o marcado no pedido ou quem preencheu. */
 function tecDoReg(r){return r.tecnicoEntrega||tecDe(r.id)||r.tecnico||'Sem técnico';}
-function tipoNome(k){return k==='outro'?'Outro':(TIPOS.filter(function(t){return t.k===k;})[0]||{l:k}).l;}
+function tipoNome(k){return k==='_sem'?'Sem tipo':(CATEGORIAS.filter(function(c){return c.k===k;})[0]||{l:k}).l;}
 function tabelaRel(){
   var por={},tot={_n:0};
   (REL.itens||[]).forEach(function(r){
-    var t=tecDoReg(r),l=por[t]=por[t]||{_n:0};l._n++;tot._n++;
-    var tipos=tiposDe(r);if(!tipos.length)tipos=['_sem'];
-    tipos.forEach(function(k){l[k]=(l[k]||0)+1;tot[k]=(tot[k]||0)+1;});
+    var t=tecDoReg(r),l=por[t]=por[t]||{_n:0},k=categoriaDe(r);l._n++;tot._n++;
+    l[k]=(l[k]||0)+1;tot[k]=(tot[k]||0)+1;
   });
-  var cols=TIPOS.map(function(t){return t.k;});if(tot._sem)cols.push('_sem');
+  var cols=CATEGORIAS.map(function(c){return c.k;});if(tot._sem)cols.push('_sem');
   var nomes=S.tecsRua.slice();Object.keys(por).forEach(function(n){if(nomes.indexOf(n)<0)nomes.push(n);});
   return{por:por,tot:tot,cols:cols,nomes:nomes};
 }
@@ -629,10 +642,10 @@ function renderRelatorio(){
   var h='<div class="card"><div style="display:flex;align-items:center;gap:8px;justify-content:space-between;">'
     +'<button class="btn btn-g btn-sm" onclick="mudarMes(-1)">‹ Anterior</button><b style="font-size:16px;text-transform:capitalize;">'+nomeMes(REL.mes)+'</b>'
     +'<button class="btn btn-g btn-sm" onclick="mudarMes(1)"'+(REL.mes>=mesAtual()?' disabled':'')+'>Próximo ›</button></div>'
-    +'<div class="sub" style="margin-top:6px;">Atendimentos concluídos (relatório assinado) no mês. Um atendimento com mais de um serviço conta em cada um.</div></div>';
+    +'<div class="sub" style="margin-top:6px;">Atendimentos concluídos (relatório assinado) no mês. Cada atendimento conta uma vez, no serviço principal: instalação › higienização › aparelho sem água › troca/entrega de refil › outro. Ex.: refil + higienização conta só como higienização.</div></div>';
   if(REL.carregando){$('app').innerHTML=h+'<div class="empty"><span class="spin"></span> Contando…</div>';return;}
   if(REL.erro)h+='<div class="err">Não foi possível ler os atendimentos: '+esc(REL.erro)+'</div>';
-  var t=tabelaRel(),nomeCol=function(k){return k==='_sem'?'Sem tipo':tipoNome(k);};
+  var t=tabelaRel(),nomeCol=tipoNome;
   h+='<div class="card tw"><table class="rel-t"><thead><tr><th>Técnico</th>'+t.cols.map(function(k){return'<th>'+esc(nomeCol(k))+'</th>';}).join('')+'<th>Atendimentos</th></tr></thead><tbody>'
     +t.nomes.map(function(n){var l=t.por[n]||{_n:0};return'<tr><td>👷 '+esc(n)+'</td>'+t.cols.map(function(k){return'<td class="'+(l[k]?'':'z')+'">'+(l[k]||0)+'</td>';}).join('')+'<td><b>'+l._n+'</b></td></tr>';}).join('')
     +'<tr class="tot"><td>Total</td>'+t.cols.map(function(k){return'<td>'+(t.tot[k]||0)+'</td>';}).join('')+'<td>'+t.tot._n+'</td></tr></tbody></table>'
@@ -641,22 +654,22 @@ function renderRelatorio(){
     h+='<div class="card"><div class="sec">Atendimentos do mês ('+REL.itens.length+')</div>'
       +REL.itens.map(function(r){return'<div style="padding:8px 0;border-bottom:1px solid var(--border);cursor:pointer;" onclick="abrirPedido('+Number(r.id)+')">'
         +'<b>'+esc(r.numero||'')+'</b> · '+esc(r.cliente||'')+' <span class="sub">· '+fmtDH(r.assinatura.em)+'</span>'
-        +'<div class="sub">👷 '+esc(tecDoReg(r))+' · '+esc(nomeTipos(r)||'sem tipo marcado')+'</div></div>';}).join('')+'</div>';
+        +'<div class="sub">👷 '+esc(tecDoReg(r))+' · '+esc(nomeTipos(r)||'sem tipo marcado')+' → <b>'+esc(tipoNome(categoriaDe(r)))+'</b></div></div>';}).join('')+'</div>';
   }else if(!REL.erro)h+='<div class="empty">Nenhum atendimento concluído em '+nomeMes(REL.mes)+'.</div>';
   $('app').innerHTML=h;
 }
 /* Planilha (CSV, abre no Excel): o resumo e, abaixo, cada atendimento. */
 function baixarRelatorio(){
   var t=tabelaRel(),q=function(v){return'"'+String(v==null?'':v).replace(/"/g,'""')+'"';},L=[];
-  var nomeCol=function(k){return k==='_sem'?'Sem tipo':tipoNome(k);};
+  var nomeCol=tipoNome;
   L.push([q('Serviços por técnico — '+nomeMes(REL.mes))].join(';'));
   L.push([q('Técnico')].concat(t.cols.map(function(k){return q(nomeCol(k));})).concat([q('Atendimentos')]).join(';'));
   t.nomes.forEach(function(n){var l=t.por[n]||{_n:0};L.push([q(n)].concat(t.cols.map(function(k){return l[k]||0;})).concat([l._n]).join(';'));});
   L.push([q('Total')].concat(t.cols.map(function(k){return t.tot[k]||0;})).concat([t.tot._n]).join(';'));
-  L.push('');L.push(['Data','Pedido','Cliente','Técnico','Serviços','Pagamento'].map(q).join(';'));
+  L.push('');L.push(['Data','Pedido','Cliente','Técnico','Serviços marcados','Contado como','Pagamento'].map(q).join(';'));
   (REL.itens||[]).forEach(function(r){
     var pg=r.pagamento||{},pag=pg.feito==='Sim'?(pg.forma||'')+(pg.parcelas&&pg.parcelas!=='À vista'?' '+pg.parcelas:''):pg.feito==='Não'?'Não pago no local':'';
-    L.push([fmtDH(r.assinatura.em),r.numero,r.cliente,tecDoReg(r),nomeTipos(r),pag].map(q).join(';'));
+    L.push([fmtDH(r.assinatura.em),r.numero,r.cliente,tecDoReg(r),nomeTipos(r),tipoNome(categoriaDe(r)),pag].map(q).join(';'));
   });
   var blob=new Blob(['﻿'+L.join('\r\n')],{type:'text/csv;charset=utf-8'});
   var a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='servicos-por-tecnico-'+REL.mes+'.csv';
