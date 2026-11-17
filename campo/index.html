@@ -988,6 +988,7 @@ function desenharMapaRota(res,ordem){
 function regAtual(){return S.ped&&S.reg[String(S.ped.id)]||{};}
 async function abrirPedido(id){
   document.body.classList.remove('largo');
+  S.editando=false;
   S.tela='ped';S.ped={id:id,_carregando:true};S.pedErr='';S.midias=[];
   window.scrollTo(0,0);renderPedido();
   history.pushState({ped:id},'');
@@ -1040,16 +1041,16 @@ function renderPedido(){
     +'</dl>'+itensHtml(o)+'</div>';
 
   /* Registro do atendimento */
-  var assinado=!!r.assinatura,trava=assinado?' disabled':'';
+  var assinado=!!r.assinatura,bloq=assinado&&!S.editando,trava=bloq?' disabled':'';
   h+='<div class="card"><div class="sec">Registro do atendimento</div>'
-    +tiposHtml(r,assinado)
+    +tiposHtml(r,bloq)
     +GRUPOS_FOTO.map(function(g){var fs=fotosDe(g.k);
       return'<div class="field" id="fotos-'+g.k+'"><label>'+rotuloFoto(g.k,r)+' <span class="req">*</span> <span class="sub">('+fs.length+'/'+MAX_FOTOS+')</span></label><div class="photos">'
-        +fs.map(function(m){return'<div class="ph-t"><img src="'+m.data+'"/>'+(assinado?'':'<button class="x" onclick="rmFoto(\''+m.id+'\')">✕</button>')+'</div>';}).join('')
-        +'</div>'+(assinado?'':'<div class="addbar"><button class="btn btn-g" onclick="addFoto(true,\''+g.k+'\')">📷 Tirar foto</button><button class="btn btn-g" onclick="addFoto(false,\''+g.k+'\')">🖼 Galeria</button></div>')
+        +fs.map(function(m){return'<div class="ph-t"><img src="'+m.data+'"/>'+(bloq?'':'<button class="x" onclick="rmFoto(\''+m.id+'\')">✕</button>')+'</div>';}).join('')
+        +'</div>'+(bloq?'':'<div class="addbar"><button class="btn btn-g" onclick="addFoto(true,\''+g.k+'\')">📷 Tirar foto</button><button class="btn btn-g" onclick="addFoto(false,\''+g.k+'\')">🖼 Galeria</button></div>')
         +'<div class="sub" id="foto-st-'+g.k+'"></div></div>';}).join('')
-    +checkHtml(r.checklist||{},assinado,tiposDe(r))
-    +pagHtml(r.pagamento||{},assinado)
+    +checkHtml(r.checklist||{},bloq,tiposDe(r))
+    +pagHtml(r.pagamento||{},bloq)
     +'<div class="field"><label>Observações do técnico <span class="req">*</span></label><textarea id="obs" rows="4" placeholder="O que foi feito, peças trocadas, pendências…"'+trava+' onchange="salvarCampos()">'+esc(r.obs||'')+'</textarea></div>'
     +'<div class="field"><label>Quem recebeu / assinou <span class="req">*</span></label><input id="rec-nome" value="'+esc(r.recebedor?r.recebedor.nome:(c.nome||''))+'"'+trava+' onchange="salvarCampos()"/></div>'
     +'</div>';
@@ -1062,8 +1063,12 @@ function renderPedido(){
     var a=r.assinatura,env=r.envio&&r.envio.ok?r.envio:null;
     h+='<div class="sig-img"><img src="'+a.img+'"/></div>'
       +'<div class="sub" style="margin:6px 0 12px;">Assinado por <b>'+esc(r.recebedor&&r.recebedor.nome||'-')+'</b> em '+fmtDH(a.em)
-      +(r.local&&r.local.lat?' · 📍 '+r.local.lat.toFixed(5)+', '+r.local.lng.toFixed(5):' · sem localização')+'</div>';
-    if(ehTec()){
+      +(r.local&&r.local.lat?' · 📍 '+r.local.lat.toFixed(5)+', '+r.local.lng.toFixed(5):' · sem localização')+'</div>'
+      +edicoesHtml(r);
+    if(S.editando){
+      h+='<div class="info">✏️ Editando o relatório. A assinatura do cliente fica como está; as alterações são salvas e o PDF sai com elas.</div>'
+        +'<button class="btn btn-ok btn-lg" onclick="salvarEdicao()">💾 Salvar alterações</button>';
+    }else if(ehTec()){
       h+='<div class="okbox">✔ Relatório salvo. O comercial confere e envia ao cliente.</div>'
         +'<div class="actions"><button class="btn btn-g" onclick="verPdf()">👁 Ver relatório (PDF)</button></div>';
     }else{
@@ -1076,13 +1081,31 @@ function renderPedido(){
       h+=(fones.length?'<button class="btn btn-ok btn-lg" style="margin-top:10px;" onclick="enviarWhatsWeb()">🟢 '+(env?'Enviar de novo':'Enviar')+' pelo WhatsApp Web</button>':'')
         +'<div class="actions"><button class="btn btn-g" onclick="baixarPdf()">⬇ Baixar PDF</button>'+(navigator.share?'<button class="btn btn-g" onclick="compartilhar()">📤 Enviar pelo celular</button>':'')+'</div>';
     }
-    if(!(r.envio&&r.envio.ok))h+='<div class="actions"><button class="btn btn-g btn-sm" onclick="desfazerAssin()">Refazer assinatura</button></div>';
+    if(!S.editando)h+='<div class="actions"><button class="btn btn-g" onclick="editarRelatorio()">✏️ Editar relatório</button>'
+      +(!(r.envio&&r.envio.ok)?'<button class="btn btn-g btn-sm" onclick="desfazerAssin()">Refazer assinatura</button>':'')+'</div>';
   }else{
     h+='<div class="sub" style="margin-bottom:10px;">Confira as fotos e observações. Depois da assinatura o registro fica travado.</div>'
       +'<button class="btn btn-p btn-lg" onclick="assinar()">✍️ Cliente assinar e salvar</button>';
   }
   h+='</div>';
   $('app').innerHTML=h;
+}
+/* Edição do relatório depois da assinatura (técnico ou comercial). */
+function editarRelatorio(){S.editando=true;var y=window.scrollY;renderPedido();window.scrollTo(0,y);toast('Relatório liberado para edição');}
+function salvarEdicao(){
+  if(!validarRelatorio())return;
+  var r=regAtual(),ed=(r.edicoes||[]).concat([{por:S.tecnico,em:Date.now()}]);
+  salvarCampos({edicoes:ed});
+  S.editando=false;var y=window.scrollY;renderPedido();window.scrollTo(0,y);
+  toast('Alterações salvas ✔');
+}
+function ultimaEdicao(r){var e=r&&r.edicoes;return e&&e.length?e[e.length-1]:null;}
+function edicoesHtml(r){
+  var e=ultimaEdicao(r);if(!e)return'';
+  var envio=r.envio&&r.envio.ok?r.envio:null,depois=envio&&e.em>Number(envio.em||0);
+  return'<div class="sub" style="margin:-6px 0 12px;">✏️ Editado depois da assinatura por <b>'+esc(e.por||'-')+'</b> em '+fmtDH(e.em)
+    +(r.edicoes.length>1?' ('+r.edicoes.length+' edições)':'')+'</div>'
+    +(depois&&!ehTec()?'<div class="err" style="margin-bottom:10px;">O relatório foi editado depois de enviado ao cliente. Envie de novo se a mudança for importante.</div>':'');
 }
 function tiposHtml(r,trava){
   var t=tiposDe(r),dis=trava?' disabled':'';
@@ -1310,23 +1333,32 @@ function rmFoto(id){
    em vez de desenhar). Na confirmação gravamos hora e GPS do aparelho. */
 var SIG=null;
 function assinar(){
-  var tipos=tiposDe(regAtual());
-  if(!tipos.length){toast('Marque o tipo de serviço');$('tipos').scrollIntoView({behavior:'smooth',block:'center'});return;}
-  if(tipos.indexOf('outro')>=0&&!val('tipo-outro')){toast('Escreva qual é o serviço');$('tipo-outro').focus();return;}
-  var ativas=checkAtivo(tipos),ck=ckLer(),falta=ativas.filter(function(q){return!ck[q.k]||!ck[q.k].r;});
-  if(falta.length){
-    toast(falta.length===1?'Responda a pergunta '+(ativas.indexOf(falta[0])+1)+' antes da assinatura':'Responda as perguntas '+falta.map(function(q){return ativas.indexOf(q)+1;}).join(', ')+' antes da assinatura');
-    $('ck-'+falta[0].k).scrollIntoView({behavior:'smooth',block:'center'});return;
-  }
-  var pg=pagLer(),fp=pg&&pagFalta(pg);
-  if(fp){toast(fp);$('pag').scrollIntoView({behavior:'smooth',block:'center'});return;}
-  if(!val('obs')){toast('Escreva as observações do técnico');$('obs').scrollIntoView({behavior:'smooth',block:'center'});$('obs').focus();return;}
-  var semFoto=GRUPOS_FOTO.filter(function(g){return!fotosDe(g.k).length;});
-  if(semFoto.length){toast('Falta: '+semFoto.map(function(g){return rotuloFoto(g.k,regAtual()).toLowerCase();}).join(' e '));$('fotos-'+semFoto[0].k).scrollIntoView({behavior:'smooth',block:'center'});return;}
+  if(!validarRelatorio())return;
   var nome=val('rec-nome');
-  if(!nome){toast('Preencha quem está recebendo/assinando');$('rec-nome').focus();return;}
   salvarCampos();
   pegarLocal();
+  abrirAssinatura(nome);
+}
+/* Confere os campos obrigatórios do relatório (avisa e rola até o que falta). */
+function validarRelatorio(){
+  var tipos=tiposDe(regAtual());
+  if(!tipos.length){toast('Marque o tipo de serviço');$('tipos').scrollIntoView({behavior:'smooth',block:'center'});return false;}
+  if(tipos.indexOf('outro')>=0&&!val('tipo-outro')){toast('Escreva qual é o serviço');$('tipo-outro').focus();return false;}
+  var ativas=checkAtivo(tipos),ck=ckLer(),falta=ativas.filter(function(q){return!ck[q.k]||!ck[q.k].r;});
+  if(falta.length){
+    var fim=S.editando?' antes de salvar':' antes da assinatura';
+    toast(falta.length===1?'Responda a pergunta '+(ativas.indexOf(falta[0])+1)+fim:'Responda as perguntas '+falta.map(function(q){return ativas.indexOf(q)+1;}).join(', ')+fim);
+    $('ck-'+falta[0].k).scrollIntoView({behavior:'smooth',block:'center'});return false;
+  }
+  var pg=pagLer(),fp=pg&&pagFalta(pg);
+  if(fp){toast(fp);$('pag').scrollIntoView({behavior:'smooth',block:'center'});return false;}
+  if(!val('obs')){toast('Escreva as observações do técnico');$('obs').scrollIntoView({behavior:'smooth',block:'center'});$('obs').focus();return false;}
+  var semFoto=GRUPOS_FOTO.filter(function(g){return!fotosDe(g.k).length;});
+  if(semFoto.length){toast('Falta: '+semFoto.map(function(g){return rotuloFoto(g.k,regAtual()).toLowerCase();}).join(' e '));$('fotos-'+semFoto[0].k).scrollIntoView({behavior:'smooth',block:'center'});return false;}
+  if(!val('rec-nome')){toast('Preencha quem está recebendo/assinando');$('rec-nome').focus();return false;}
+  return true;
+}
+function abrirAssinatura(nome){
   var ov=document.createElement('div');ov.className='sig-full';ov.id='sig-full';
   ov.innerHTML='<div class="sig-top"><div><b>Assinatura — '+esc(nome)+'</b><div class="sub">Pedido '+esc(S.ped.numero||'')+' · '+esc(S.ped.cliente&&S.ped.cliente.nome||'')+'</div></div>'
     +'<button class="mdl-x" onclick="fecharAssin()">✕</button></div>'
@@ -1595,6 +1627,7 @@ async function montarPdf(){
   y+=44;
   /* Registro da assinatura: o comprovante de quando e onde foi assinada. */
   var reg=['Assinado na tela do aparelho do técnico em '+fmtDH(a.em)+'.'];
+  var ue=ultimaEdicao(r);if(ue)reg.push('Relatório editado depois da assinatura por '+(ue.por||'-')+' em '+fmtDH(ue.em)+'.');
   if(r.local&&r.local.lat)reg.push('Localização: '+r.local.lat.toFixed(6)+', '+r.local.lng.toFixed(6)+' (precisão ~'+r.local.precisao+' m) — https://maps.google.com/?q='+r.local.lat.toFixed(6)+','+r.local.lng.toFixed(6));
   else reg.push('Localização: não disponível no momento da assinatura.');
   doc.setFontSize(6.8);doc.setTextColor(120,120,120);
