@@ -363,9 +363,11 @@ function entrar(perfil,nome){
 /* ═══ Entregas (pedidos do Bling pela data prevista = dia da entrega) ═══
    Um filtro por data, em sequência: de 7 dias atrás até as próximas entregas.
    Abre no dia de hoje ou, sem entrega hoje, na próxima data com entrega. */
-async function carregarLista(){
+async function carregarLista(silencioso){
   if(S.carregando)return;
-  S.carregando=true;S.listaErr='';renderLista();
+  S.carregando=true;S.listaEm=Date.now();
+  var antes=JSON.stringify(S.lista||null);
+  if(!silencioso){S.listaErr='';renderLista();}
   try{
     var r=await api('/api/bling/campo/pedidos?antes=7&depois=7');
     S.lista=r.pedidos;S.hoje=r.hoje;S.de=r.de;S.ate=r.ate;
@@ -375,10 +377,31 @@ async function carregarLista(){
       try{juntarPedidos((await api('/api/bling/campo/pedidos?de='+pr.de+'&ate='+pr.ate)).pedidos);}catch(e){}
     }
     lsSet('campo_lista',JSON.stringify({em:Date.now(),hoje:r.hoje,lista:S.lista}));
-  }catch(e){S.listaErr=e.message;}
+  }catch(e){if(!silencioso)S.listaErr=e.message;}
   S.carregando=false;
-  if(S.tela==='lista')renderLista();
+  if(S.tela!=='lista')return;
+  /* Na atualização automática só redesenha se algo mudou e ninguém está no
+     meio de uma ação (janela aberta, digitando, arrastando no quadro). */
+  if(silencioso&&(JSON.stringify(S.lista||null)===antes||ocupado()))return;
+  renderLista();
 }
+/* Atualização automática da lista do Bling a cada 3 min (só com o app na
+   tela). Os relatórios dos técnicos já chegam na hora pelo Firestore. */
+var LISTA_INTERVALO=3*60*1000;
+function ocupado(){
+  var a=document.activeElement;
+  return!!(document.querySelector('.mdl-ov')||_arrastando
+    ||(a&&/^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName)));
+}
+function autoAtualizar(){
+  if(document.visibilityState!=='visible'||!S.tecnico||!S.perfil)return;
+  if(Date.now()-(S.listaEm||0)>=LISTA_INTERVALO-5000)carregarLista(true);
+}
+setInterval(autoAtualizar,LISTA_INTERVALO);
+var _arrastando=false;
+document.addEventListener('dragstart',function(){_arrastando=true;});
+document.addEventListener('dragend',function(){_arrastando=false;});
+document.addEventListener('visibilitychange',autoAtualizar);
 function juntarPedidos(novos){
   var ids={};(S.lista||[]).forEach(function(o){ids[o.id]=1;});
   S.lista=(S.lista||[]).concat(novos.filter(function(o){return!ids[o.id];}));
