@@ -201,11 +201,24 @@ var GRUPOS_FOTO=[{k:'antes',l:'Antes'},{k:'depois',l:'Depois'}];
 function fotosDe(g){return S.midias.filter(function(m){return(m.grupo||'depois')===g;});}
 /* Perguntas obrigatórias do atendimento: respondidas antes da assinatura e
    impressas no PDF. A observação de cada uma é opcional. */
+/* Tipo de serviço, marcado pelo técnico (um ou mais). Define quais
+   perguntas aparecem: "naoEm" tira a pergunta quando o tipo está marcado. */
+var TIPOS=[{k:'refil',l:'Troca de refil'},{k:'hig',l:'Higienização'},{k:'semagua',l:'Aparelho sem água'},{k:'instalacao',l:'Instalação nova'},{k:'outro',l:'Outro'}];
 var CHECK=[
-  {k:'higienizacao',p:'O aparelho precisa de higienização?',o:['Sim','Não','Feita neste atendimento'],obs:'Observação (opcional)'},
+  {k:'higienizacao',p:'O aparelho precisa de higienização?',o:['Sim','Não','Feita neste atendimento'],obs:'Observação (opcional)',naoEm:['instalacao']},
   {k:'pressao',p:'Qual a pressão do local?',valor:'kgf/cm²'},
-  {k:'mangueiras',p:'As mangueiras estão ressecadas ou foram trocadas há mais de um ano?',o:['Sim','Não','Trocadas neste atendimento','Não verificado'],obs:'Observação (opcional)'}
+  {k:'mangueiras',p:'As mangueiras estão ressecadas ou foram trocadas há mais de um ano?',o:['Sim','Não','Trocadas neste atendimento','Não verificado'],obs:'Observação (opcional)',naoEm:['instalacao']}
 ];
+function tiposDe(r){return(r&&r.tipos)||[];}
+/* Perguntas que valem para os tipos marcados. */
+function checkAtivo(tipos){return CHECK.filter(function(q){return!(q.naoEm||[]).some(function(t){return tipos.indexOf(t)>=0;});});}
+function nomeTipos(r){return tiposDe(r).map(function(k){return k==='outro'?(r.tipoOutro||'Outro'):(TIPOS.filter(function(t){return t.k===k;})[0]||{l:k}).l;}).join(', ');}
+/* Na instalação nova, "antes" é o local e "depois" é o aparelho instalado. */
+function rotuloFoto(g,r){
+  var inst=tiposDe(r).indexOf('instalacao')>=0;
+  if(g==='antes')return inst?'Foto do local antes da instalação':'Foto do aparelho antes do serviço';
+  return inst?'Foto do aparelho instalado':'Foto do aparelho depois do serviço';
+}
 /* Pagamento na entrega: obrigatório dizer se foi feito e, se sim, a forma. */
 var FORMAS_PAG=['Pix','Crédito','Débito'],PARCELAS=['À vista','2x','3x','4x','5x','6x','7x','8x','9x','10x','11x','12x'];
 var TERMO='Declaro que recebi nesta data os produtos e/ou serviços descritos neste pedido, nas condições registradas acima.';
@@ -900,12 +913,13 @@ function renderPedido(){
   /* Registro do atendimento */
   var assinado=!!r.assinatura,trava=assinado?' disabled':'';
   h+='<div class="card"><div class="sec">Registro do atendimento</div>'
+    +tiposHtml(r,assinado)
     +GRUPOS_FOTO.map(function(g){var fs=fotosDe(g.k);
-      return'<div class="field" id="fotos-'+g.k+'"><label>Foto do aparelho '+g.l.toLowerCase()+' do serviço <span class="req">*</span> <span class="sub">('+fs.length+'/'+MAX_FOTOS+')</span></label><div class="photos">'
+      return'<div class="field" id="fotos-'+g.k+'"><label>'+rotuloFoto(g.k,r)+' <span class="req">*</span> <span class="sub">('+fs.length+'/'+MAX_FOTOS+')</span></label><div class="photos">'
         +fs.map(function(m){return'<div class="ph-t"><img src="'+m.data+'"/>'+(assinado?'':'<button class="x" onclick="rmFoto(\''+m.id+'\')">✕</button>')+'</div>';}).join('')
         +'</div>'+(assinado?'':'<div class="addbar"><button class="btn btn-g" onclick="addFoto(true,\''+g.k+'\')">📷 Tirar foto</button><button class="btn btn-g" onclick="addFoto(false,\''+g.k+'\')">🖼 Galeria</button></div>')
         +'<div class="sub" id="foto-st-'+g.k+'"></div></div>';}).join('')
-    +checkHtml(r.checklist||{},assinado)
+    +checkHtml(r.checklist||{},assinado,tiposDe(r))
     +pagHtml(r.pagamento||{},assinado)
     +'<div class="field"><label>Observações do técnico <span class="req">*</span></label><textarea id="obs" rows="4" placeholder="O que foi feito, peças trocadas, pendências…"'+trava+' onchange="salvarCampos()">'+esc(r.obs||'')+'</textarea></div>'
     +'<div class="field"><label>Quem recebeu / assinou <span class="req">*</span></label><input id="rec-nome" value="'+esc(r.recebedor?r.recebedor.nome:(c.nome||''))+'"'+trava+' onchange="salvarCampos()"/></div>'
@@ -933,8 +947,21 @@ function renderPedido(){
   h+='</div>';
   $('app').innerHTML=h;
 }
-function checkHtml(ck,trava){
-  return CHECK.map(function(q,i){
+function tiposHtml(r,trava){
+  var t=tiposDe(r),dis=trava?' disabled':'';
+  return'<div class="field" id="tipos"><label>Tipo de serviço <span class="req">*</span> <span class="sub">(pode marcar mais de um)</span></label><div class="opts">'
+    +TIPOS.map(function(x){return'<button type="button" class="chip'+(t.indexOf(x.k)>=0?' on':'')+'"'+dis+' onclick="tipoSel(\''+x.k+'\')">'+(t.indexOf(x.k)>=0?'✔ ':'')+esc(x.l)+'</button>';}).join('')+'</div>'
+    +(t.indexOf('outro')>=0?'<input id="tipo-outro" placeholder="Qual serviço? *" style="margin-top:6px;font-size:14px;" value="'+esc(r.tipoOutro||'')+'"'+dis+' onchange="salvarCampos()"/>':'')+'</div>';
+}
+/* Marca/desmarca um tipo e redesenha (as perguntas mudam com o tipo). */
+function tipoSel(k){
+  var r=regAtual(),t=tiposDe(r).slice(),i=t.indexOf(k);
+  if(i>=0)t.splice(i,1);else t.push(k);
+  var y=window.scrollY;
+  salvarCampos({tipos:t});renderPedido();window.scrollTo(0,y);
+}
+function checkHtml(ck,trava,tipos){
+  return checkAtivo(tipos||[]).map(function(q,i){
     var a=ck[q.k]||{};
     /* Pergunta de valor (a pressão): só o número, obrigatório. */
     if(q.valor)return'<div class="field" id="ck-'+q.k+'"><label>'+(i+1)+'. '+esc(q.p)+' <span class="req">*</span></label>'
@@ -1012,7 +1039,8 @@ function regBase(){
 function salvarCampos(extra){
   var r=regBase();
   if($('obs'))r.obs=val('obs');
-  if($('ck-'+CHECK[0].k))r.checklist=ckLer();
+  if($('tipos'))r.checklist=ckLer();
+  if($('tipo-outro'))r.tipoOutro=val('tipo-outro');
   if($('pag'))r.pagamento=pagLer();
   if($('rec-nome'))r.recebedor={nome:val('rec-nome')};
   if(extra)for(var k in extra)r[k]=extra[k];
@@ -1145,16 +1173,19 @@ function rmFoto(id){
    em vez de desenhar). Na confirmação gravamos hora e GPS do aparelho. */
 var SIG=null;
 function assinar(){
-  var ck=ckLer(),falta=CHECK.filter(function(q){return!ck[q.k]||!ck[q.k].r;});
+  var tipos=tiposDe(regAtual());
+  if(!tipos.length){toast('Marque o tipo de serviço');$('tipos').scrollIntoView({behavior:'smooth',block:'center'});return;}
+  if(tipos.indexOf('outro')>=0&&!val('tipo-outro')){toast('Escreva qual é o serviço');$('tipo-outro').focus();return;}
+  var ativas=checkAtivo(tipos),ck=ckLer(),falta=ativas.filter(function(q){return!ck[q.k]||!ck[q.k].r;});
   if(falta.length){
-    toast(falta.length===1?'Responda a pergunta '+(CHECK.indexOf(falta[0])+1)+' antes da assinatura':'Responda as perguntas '+falta.map(function(q){return CHECK.indexOf(q)+1;}).join(', ')+' antes da assinatura');
+    toast(falta.length===1?'Responda a pergunta '+(ativas.indexOf(falta[0])+1)+' antes da assinatura':'Responda as perguntas '+falta.map(function(q){return ativas.indexOf(q)+1;}).join(', ')+' antes da assinatura');
     $('ck-'+falta[0].k).scrollIntoView({behavior:'smooth',block:'center'});return;
   }
   var pg=pagLer(),fp=pg&&pagFalta(pg);
   if(fp){toast(fp);$('pag').scrollIntoView({behavior:'smooth',block:'center'});return;}
   if(!val('obs')){toast('Escreva as observações do técnico');$('obs').scrollIntoView({behavior:'smooth',block:'center'});$('obs').focus();return;}
   var semFoto=GRUPOS_FOTO.filter(function(g){return!fotosDe(g.k).length;});
-  if(semFoto.length){toast('Tire ao menos uma foto do aparelho '+semFoto.map(function(g){return g.l.toLowerCase();}).join(' e '));$('fotos-'+semFoto[0].k).scrollIntoView({behavior:'smooth',block:'center'});return;}
+  if(semFoto.length){toast('Falta: '+semFoto.map(function(g){return rotuloFoto(g.k,regAtual()).toLowerCase();}).join(' e '));$('fotos-'+semFoto[0].k).scrollIntoView({behavior:'smooth',block:'center'});return;}
   var nome=val('rec-nome');
   if(!nome){toast('Preencha quem está recebendo/assinando');$('rec-nome').focus();return;}
   salvarCampos();
@@ -1374,10 +1405,11 @@ async function montarPdf(){
     if(o.total){chk(8);y+=2;doc.setFont('helvetica','bold');doc.text('Total: '+money(o.total),MR-2,y,{align:'right'});y+=6;}
   }
   if(o.observacoes){section('Observações do pedido');texto(o.observacoes);}
-  var ck=r.checklist||{};
-  if(CHECK.some(function(q){return ck[q.k]&&ck[q.k].r;})){
+  if(tiposDe(r).length){section('Serviço realizado');texto(nomeTipos(r));}
+  var ck=r.checklist||{},ativas=checkAtivo(tiposDe(r));
+  if(ativas.some(function(q){return ck[q.k]&&ck[q.k].r;})){
     section('Verificações do técnico');
-    CHECK.forEach(function(q,i){
+    ativas.forEach(function(q,i){
       var a=ck[q.k];if(!a||!a.r)return;
       var lq=doc.splitTextToSize((i+1)+'. '+q.p,MR-ML-4),la=doc.splitTextToSize(a.r+(a.obs?' — '+a.obs:''),MR-ML-10);
       chk((lq.length+la.length)*4.5+2);
@@ -1395,7 +1427,7 @@ async function montarPdf(){
   GRUPOS_FOTO.forEach(function(g){
   var fotos=fotosDe(g.k).filter(function(m){return m.data;});
   if(fotos.length){
-    section('Fotos do aparelho — '+g.l.toLowerCase()+' do serviço');
+    section(rotuloFoto(g.k,r).replace(/^Foto /,'Fotos '));
     var W=58,H=44,G=4;
     for(var i=0;i<fotos.length;i++){
       var col=i%3;
