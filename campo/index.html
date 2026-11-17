@@ -136,7 +136,16 @@ body.largo main{max-width:none;}
 .its .n{text-align:right;white-space:nowrap;}
 .photos{display:grid;grid-template-columns:repeat(auto-fill,minmax(92px,1fr));gap:8px;}
 .ph-t{position:relative;aspect-ratio:1;border-radius:var(--r2);overflow:hidden;background:#e5e7eb;}
-.ph-t img{width:100%;height:100%;object-fit:cover;display:block;}
+.ph-t img{width:100%;height:100%;object-fit:cover;display:block;cursor:zoom-in;}
+.foto-ov{position:fixed;inset:0;z-index:90;background:#000;display:flex;flex-direction:column;}
+.foto-ov .fv-top{display:flex;align-items:center;justify-content:space-between;padding:10px 12px;color:#fff;font-size:14px;}
+.foto-ov .fv-top button,.foto-ov .fv-nav{background:rgba(255,255,255,.18);color:#fff;border:none;border-radius:50%;width:40px;height:40px;font-size:20px;cursor:pointer;}
+.foto-ov .fv-box{flex:1;overflow:auto;display:flex;align-items:center;justify-content:center;touch-action:pan-x pan-y pinch-zoom;}
+.foto-ov .fv-box img{max-width:100%;max-height:100%;object-fit:contain;cursor:zoom-in;}
+.foto-ov .fv-box.zoom{display:block;}
+.foto-ov .fv-box.zoom img{max-width:none;max-height:none;width:250%;cursor:zoom-out;}
+.foto-ov .fv-nav{position:absolute;top:50%;transform:translateY(-50%);}
+.foto-ov .fv-ant{left:10px;}.foto-ov .fv-prox{right:10px;}
 .ph-t .x{position:absolute;top:4px;right:4px;background:rgba(0,0,0,.6);color:#fff;border:none;border-radius:50%;width:26px;height:26px;font-size:13px;}
 .addbar{display:flex;gap:8px;margin-top:8px;}
 .addbar .btn{flex:1;}
@@ -390,7 +399,7 @@ async function carregarLista(silencioso){
 var LISTA_INTERVALO=3*60*1000;
 function ocupado(){
   var a=document.activeElement;
-  return!!(document.querySelector('.mdl-ov')||_arrastando
+  return!!(document.querySelector('.mdl-ov')||$('foto-ov')||_arrastando
     ||(a&&/^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName)));
 }
 function autoAtualizar(){
@@ -1069,7 +1078,7 @@ function renderPedido(){
     +tiposHtml(r,bloq)
     +GRUPOS_FOTO.map(function(g){var fs=fotosDe(g.k);
       return'<div class="field" id="fotos-'+g.k+'"><label>'+rotuloFoto(g.k,r)+' <span class="req">*</span> <span class="sub">('+fs.length+'/'+MAX_FOTOS+')</span></label><div class="photos">'
-        +fs.map(function(m){return'<div class="ph-t"><img src="'+m.data+'"/>'+(bloq?'':'<button class="x" onclick="rmFoto(\''+m.id+'\')">✕</button>')+'</div>';}).join('')
+        +fs.map(function(m){return'<div class="ph-t"><img src="'+m.data+'" onclick="verFoto(\''+m.id+'\')" alt="Foto"/>'+(bloq?'':'<button class="x" onclick="rmFoto(\''+m.id+'\')">✕</button>')+'</div>';}).join('')
         +'</div>'+(bloq?'':'<div class="addbar"><button class="btn btn-g" onclick="addFoto(true,\''+g.k+'\')">📷 Tirar foto</button><button class="btn btn-g" onclick="addFoto(false,\''+g.k+'\')">🖼 Galeria</button></div>')
         +'<div class="sub" id="foto-st-'+g.k+'"></div></div>';}).join('')
     +checkHtml(r.checklist||{},bloq,tiposDe(r))
@@ -1345,6 +1354,26 @@ function fecharCamera(salvar){
   CAM=null;var ov=$('cam-full');if(ov)ov.remove();
   if(salvar)guardarFotos(g,fotos);
 }
+/* Foto em tela cheia: toque para ampliar, setas para passar as fotos do
+   mesmo grupo (antes/depois). Esc ou ✕ fecha. */
+function verFoto(id){
+  var m=S.midias.find(function(x){return x.id===id;});if(!m)return;
+  var lista=fotosDe(m.grupo||'depois'),i=lista.indexOf(m);
+  var ov=$('foto-ov');if(ov)ov.remove();
+  ov=document.createElement('div');ov.className='foto-ov';ov.id='foto-ov';
+  ov.innerHTML='<div class="fv-top"><span>'+esc(rotuloFoto(m.grupo||'depois',regAtual()))+' · '+(i+1)+' de '+lista.length+'</span>'
+    +'<button onclick="fecharFoto()" aria-label="Fechar">✕</button></div>'
+    +'<div class="fv-box" onclick="if(event.target.tagName===\'IMG\')this.classList.toggle(\'zoom\');else fecharFoto();"><img src="'+m.data+'" alt="Foto"/></div>'
+    +(i>0?'<button class="fv-nav fv-ant" onclick="verFoto(\''+lista[i-1].id+'\')" aria-label="Anterior">‹</button>':'')
+    +(i<lista.length-1?'<button class="fv-nav fv-prox" onclick="verFoto(\''+lista[i+1].id+'\')" aria-label="Próxima">›</button>':'');
+  document.body.appendChild(ov);
+}
+function fecharFoto(){var ov=$('foto-ov');if(ov)ov.remove();}
+document.addEventListener('keydown',function(e){
+  if(!$('foto-ov'))return;
+  if(e.key==='Escape')fecharFoto();
+  else if(e.key==='ArrowRight'||e.key==='ArrowLeft'){var b=document.querySelector(e.key==='ArrowRight'?'.fv-prox':'.fv-ant');if(b)b.click();}
+});
 function rmFoto(id){
   if(!confirm('Apagar esta foto?'))return;
   S.midias=S.midias.filter(function(m){return m.id!==id;});
