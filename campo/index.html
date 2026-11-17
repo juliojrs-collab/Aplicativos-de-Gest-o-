@@ -1627,7 +1627,6 @@ async function montarPdf(){
   y+=44;
   /* Registro da assinatura: o comprovante de quando e onde foi assinada. */
   var reg=['Assinado na tela do aparelho do técnico em '+fmtDH(a.em)+'.'];
-  var ue=ultimaEdicao(r);if(ue)reg.push('Relatório editado depois da assinatura por '+(ue.por||'-')+' em '+fmtDH(ue.em)+'.');
   if(r.local&&r.local.lat)reg.push('Localização: '+r.local.lat.toFixed(6)+', '+r.local.lng.toFixed(6)+' (precisão ~'+r.local.precisao+' m) — https://maps.google.com/?q='+r.local.lat.toFixed(6)+','+r.local.lng.toFixed(6));
   else reg.push('Localização: não disponível no momento da assinatura.');
   doc.setFontSize(6.8);doc.setTextColor(120,120,120);
