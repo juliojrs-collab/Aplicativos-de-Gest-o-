@@ -1072,14 +1072,15 @@ function renderPedido(){
       h+='<div class="okbox">✔ Relatório salvo. O comercial confere e envia ao cliente.</div>'
         +'<div class="actions"><button class="btn btn-g" onclick="verPdf()">👁 Ver relatório (PDF)</button></div>';
     }else{
-      h+=(env?'<div class="okbox">✔ Enviado ao cliente'+(env.via==='whatsapp-web'?' pelo WhatsApp Web':'')+(env.telefone?' ('+esc(fmtFone(String(env.telefone).replace(/^55/,'')))+')':'')+' por '+esc(env.por||'-')+' em '+fmtDH(env.em)+'.</div>'
-          :'<div class="info">📄 Confira o relatório e envie ao cliente pelo WhatsApp Web.</div>')
+      h+=(env?'<div class="okbox">✔ Enviado ao cliente'+(env.via==='whatsapp-web'?' pelo WhatsApp Web':' pelo WhatsApp Purific')+(env.telefone?' para '+esc(fmtFone(String(env.telefone).replace(/^55/,''))):'')+' por '+esc(env.por||'-')+' em '+fmtDH(env.em)+'.</div>'
+          :'<div class="info">📄 Confira o relatório e envie ao cliente pelo WhatsApp Purific, ou baixe o PDF.</div>')
         +'<div class="actions"><button class="btn btn-g" onclick="verPdf()">👁 Conferir relatório (PDF)</button></div>';
       if(fones.length>1)h+='<div class="field" style="margin-top:10px;"><label>Enviar para</label><select id="fone">'+fones.map(function(t){return'<option value="'+esc(t)+'">'+esc(fmtFone(t))+'</option>';}).join('')+'</select></div>';
       else if(fones.length)h+='<input type="hidden" id="fone" value="'+esc(fones[0])+'"/>';
       else h+='<div class="err" style="margin-top:10px;">O cliente não tem telefone no cadastro do Bling. Baixe o PDF e envie manualmente.</div>';
-      h+=(fones.length?'<button class="btn btn-ok btn-lg" style="margin-top:10px;" onclick="enviarWhatsWeb()">🟢 '+(env?'Enviar de novo':'Enviar')+' pelo WhatsApp Web</button>':'')
-        +'<div class="actions"><button class="btn btn-g" onclick="baixarPdf()">⬇ Baixar PDF</button>'+(navigator.share?'<button class="btn btn-g" onclick="compartilhar()">📤 Enviar pelo celular</button>':'')+'</div>';
+      h+=(fones.length?'<button class="btn btn-ok btn-lg" style="margin-top:10px;" id="b-env" onclick="enviarWhatsPurific()"'+(S.enviando?' disabled':'')+'>'+(S.enviando?'<span class="spin"></span> Enviando…':'📲 '+(env?'Enviar de novo':'Enviar')+' pelo WhatsApp Purific')+'</button>'
+          +'<div class="sub" style="margin-top:4px;">Vai pelo número oficial da Purific, com o PDF, a mensagem de serviço finalizado e o botão para o cliente falar com o consultor (15) 98136-0029.</div>':'')
+        +'<div class="actions"><button class="btn btn-g" onclick="baixarPdf()">⬇ Baixar PDF</button></div>';
     }
     if(!S.editando)h+='<div class="actions"><button class="btn btn-g" onclick="editarRelatorio()">✏️ Editar relatório</button>'
       +(!(r.envio&&r.envio.ok)?'<button class="btn btn-g btn-sm" onclick="desfazerAssin()">Refazer assinatura</button>':'')+'</div>';
@@ -1640,19 +1641,6 @@ async function verPdf(){
   try{var doc=await montarPdf();window.open(URL.createObjectURL(doc.output('blob')),'_blank');}
   catch(e){alert('Erro ao gerar o PDF: '+e.message);}
 }
-/* Plano B: o próprio celular compartilha o PDF (WhatsApp do aparelho). */
-async function compartilhar(){
-  try{
-    var doc=await montarPdf(),blob=doc.output('blob'),f=new File([blob],nomePdf(),{type:'application/pdf'});
-    if(navigator.canShare&&navigator.canShare({files:[f]})){
-      await navigator.share({files:[f],title:nomePdf(),text:'Segue o seu pedido nº '+(S.ped.numero||'')+' assinado. Purific'});
-    }else{
-      var a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=nomePdf();
-      document.body.appendChild(a);a.click();a.remove();
-      toast('PDF baixado — anexe no WhatsApp');
-    }
-  }catch(e){if(e&&e.name!=='AbortError')alert('Não foi possível compartilhar: '+e.message);}
-}
 async function baixarPdf(){
   try{
     var doc=await montarPdf(),a=document.createElement('a');a.href=URL.createObjectURL(doc.output('blob'));a.download=nomePdf();
@@ -1660,22 +1648,25 @@ async function baixarPdf(){
     return true;
   }catch(e){alert('Erro ao gerar o PDF: '+e.message);return false;}
 }
-/* Baixa o PDF e abre a conversa do cliente no WhatsApp Web com a mensagem
-   pronta; o comercial anexa o arquivo (📎) e envia. Fica marcado como enviado. */
-async function enviarWhatsWeb(){
-  var d=soDig(val('fone'));if(d.length===10||d.length===11)d='55'+d;
-  if(d.length<12){toast('Telefone do cliente inválido');return;}
-  var c=S.ped.cliente||{},nome=String(c.nome||'').trim().split(/\s+/)[0]||'';
-  nome=nome?nome.charAt(0).toUpperCase()+nome.slice(1).toLowerCase():'';
-  var txt='Olá'+(nome?' '+nome:'')+', tudo bem? Aqui é da Purific 💧\nSegue em anexo o relatório do atendimento do seu pedido nº '+(S.ped.numero||'')+', assinado no dia '+fmtDH(regAtual().assinatura.em).slice(0,10)+'. Qualquer dúvida, estou à disposição!';
-  var celular=/Android|iPhone|iPad|Mobi/i.test(navigator.userAgent);
-  var url=(celular?'https://wa.me/':'https://web.whatsapp.com/send?phone=')+d+(celular?'?text=':'&text=')+encodeURIComponent(txt);
-  var jan=window.open('about:blank','_blank');
-  if(!(await baixarPdf())){if(jan)jan.close();return;}
-  if(jan)jan.location.href=url;else window.open(url,'_blank');
-  await salvarCampos({envio:{ok:true,via:'whatsapp-web',telefone:d,por:S.tecnico,em:Date.now()}}).catch(function(){});
-  renderPedido();
-  alert('O PDF "'+nomePdf()+'" foi baixado e a conversa do cliente foi aberta no WhatsApp Web.\n\nNa conversa, clique no clipe (📎), escolha o PDF e envie.');
+function blobParaDataUrl(b){return new Promise(function(ok,fail){var fr=new FileReader();fr.onload=function(){ok(fr.result);};fr.onerror=function(){fail(new Error('Falha ao ler o PDF'));};fr.readAsDataURL(b);});}
+/* Envia pelo número oficial (servidor whatsapp-crm): PDF + modelo aprovado
+   com o botão "Falar com um Consultor". Feito pelo comercial, depois de conferir. */
+async function enviarWhatsPurific(){
+  if(S.enviando)return;
+  var fone=val('fone'),id=String(S.ped.id);
+  if(!confirm('Enviar o relatório do pedido '+(S.ped.numero||'')+' para o WhatsApp '+fmtFone(fone)+' pelo número da Purific?'))return;
+  S.enviando=true;renderPedido();
+  try{
+    var doc=await montarPdf(),pdf=await blobParaDataUrl(doc.output('blob'));
+    var resp=await api('/api/bling/campo/enviar',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({pedidoId:S.ped.id,telefone:fone,pdf:pdf,tecnico:S.tecnico})});
+    await salvarCampos({envio:{ok:true,em:Date.now(),telefone:resp.telefone,via:resp.via,por:S.tecnico}}).catch(function(){});
+    toast('Relatório enviado ao cliente ✔');
+  }catch(e){
+    alert('Não foi possível enviar pelo WhatsApp Purific:\n\n'+e.message+'\n\nVocê pode baixar o PDF e enviar manualmente.');
+  }
+  S.enviando=false;
+  if(S.tela==='ped'&&String(S.ped.id)===id)renderPedido();
 }
 
 /* ═══ Localização do técnico ════════════════════════════════════════════
