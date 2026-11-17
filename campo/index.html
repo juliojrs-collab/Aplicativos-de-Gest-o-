@@ -653,11 +653,17 @@ var CATEGORIAS=[
   {k:'refil',l:'Troca/entrega de refil'},
   {k:'outro',l:'Outro'}
 ];
-function categoriaDe(r){
-  var t=tiposDe(r);
-  for(var i=0;i<CATEGORIAS.length;i++)if(t.indexOf(CATEGORIAS[i].k)>=0)return CATEGORIAS[i].k;
-  return'_sem';
+/* Purificador e Filtro Central (FC) são aparelhos distintos: o atendimento
+   conta uma vez no serviço principal de cada um (no FC: instalação › carga).
+   Ex.: instalação purificador + instalação FC conta 1 em cada coluna. */
+var CAT_FC=['inst_fc','carga_fc'];
+function categoriasDe(r){
+  var t=tiposDe(r),out=[];
+  [CATEGORIAS.filter(function(c){return CAT_FC.indexOf(c.k)<0;}),CATEGORIAS.filter(function(c){return CAT_FC.indexOf(c.k)>=0;})]
+    .forEach(function(grupo){for(var i=0;i<grupo.length;i++)if(t.indexOf(grupo[i].k)>=0){out.push(grupo[i].k);return;}});
+  return out.length?out:['_sem'];
 }
+function nomesCat(r){return categoriasDe(r).map(tipoNome).join(' + ');}
 var REL={mes:''};
 function mesAtual(){var d=new Date();return d.getFullYear()+'-'+pad(d.getMonth()+1);}
 function mesMais(m,n){var p=m.split('-').map(Number),d=new Date(p[0],p[1]-1+n,1);return d.getFullYear()+'-'+pad(d.getMonth()+1);}
@@ -689,8 +695,8 @@ function tipoNome(k){return k==='_sem'?'Sem tipo':(CATEGORIAS.filter(function(c)
 function tabelaRel(){
   var por={},tot={_n:0};
   (REL.itens||[]).forEach(function(r){
-    var t=tecDoReg(r),l=por[t]=por[t]||{_n:0},k=categoriaDe(r);l._n++;tot._n++;
-    l[k]=(l[k]||0)+1;tot[k]=(tot[k]||0)+1;
+    var t=tecDoReg(r),l=por[t]=por[t]||{_n:0};l._n++;tot._n++;
+    categoriasDe(r).forEach(function(k){l[k]=(l[k]||0)+1;tot[k]=(tot[k]||0)+1;});
   });
   var cols=CATEGORIAS.map(function(c){return c.k;});if(tot._sem)cols.push('_sem');
   var nomes=S.tecsRua.slice();Object.keys(por).forEach(function(n){if(nomes.indexOf(n)<0)nomes.push(n);});
@@ -701,7 +707,7 @@ function renderRelatorio(){
   var h='<div class="card"><div style="display:flex;align-items:center;gap:8px;justify-content:space-between;">'
     +'<button class="btn btn-g btn-sm" onclick="mudarMes(-1)">‹ Anterior</button><b style="font-size:16px;text-transform:capitalize;">'+nomeMes(REL.mes)+'</b>'
     +'<button class="btn btn-g btn-sm" onclick="mudarMes(1)"'+(REL.mes>=mesAtual()?' disabled':'')+'>Próximo ›</button></div>'
-    +'<div class="sub" style="margin-top:6px;">Atendimentos concluídos (relatório assinado) no mês. Cada atendimento conta uma vez, no serviço principal: instalação purificador › instalação FC › carga FC › higienização › visita técnica (sem água) › visita técnica (vazamento) › visita técnica (geral) › troca/entrega de refil › outro. Ex.: refil + higienização conta só como higienização.</div></div>';
+    +'<div class="sub" style="margin-top:6px;">Atendimentos concluídos (relatório assinado) no mês. Cada coluna é uma soma separada. No purificador o atendimento conta uma vez, no serviço principal: instalação › higienização › visita técnica (sem água) › visita técnica (vazamento) › visita técnica (geral) › troca/entrega de refil › outro (ex.: refil + higienização conta só como higienização). O FC é contado à parte (instalação FC › carga FC): instalação purificador + instalação FC conta 1 em cada. Por isso a soma das colunas pode passar do nº de atendimentos.</div></div>';
   if(REL.carregando){$('app').innerHTML=h+'<div class="empty"><span class="spin"></span> Contando…</div>';return;}
   if(REL.erro)h+='<div class="err">Não foi possível ler os atendimentos: '+esc(REL.erro)+'</div>';
   var t=tabelaRel(),nomeCol=tipoNome;
@@ -713,7 +719,7 @@ function renderRelatorio(){
     h+='<div class="card"><div class="sec">Atendimentos do mês ('+REL.itens.length+')</div>'
       +REL.itens.map(function(r){return'<div style="padding:8px 0;border-bottom:1px solid var(--border);cursor:pointer;" onclick="abrirPedido('+Number(r.id)+')">'
         +'<b>'+esc(r.numero||'')+'</b> · '+esc(r.cliente||'')+' <span class="sub">· '+fmtDH(r.assinatura.em)+'</span>'
-        +'<div class="sub">👷 '+esc(tecDoReg(r))+' · '+esc(nomeTipos(r)||'sem tipo marcado')+' → <b>'+esc(tipoNome(categoriaDe(r)))+'</b></div></div>';}).join('')+'</div>';
+        +'<div class="sub">👷 '+esc(tecDoReg(r))+' · '+esc(nomeTipos(r)||'sem tipo marcado')+' → <b>'+esc(nomesCat(r))+'</b></div></div>';}).join('')+'</div>';
   }else if(!REL.erro)h+='<div class="empty">Nenhum atendimento concluído em '+nomeMes(REL.mes)+'.</div>';
   $('app').innerHTML=h;
 }
@@ -728,7 +734,7 @@ function baixarRelatorio(){
   L.push('');L.push(['Data','Pedido','Cliente','Técnico','Serviços marcados','Contado como','Pagamento'].map(q).join(';'));
   (REL.itens||[]).forEach(function(r){
     var pg=r.pagamento||{},pag=pg.feito==='Sim'?(pg.forma||'')+(pg.parcelas&&pg.parcelas!=='À vista'?' '+pg.parcelas:''):pg.feito==='Não'?'Não pago no local':'';
-    L.push([fmtDH(r.assinatura.em),r.numero,r.cliente,tecDoReg(r),nomeTipos(r),tipoNome(categoriaDe(r)),pag].map(q).join(';'));
+    L.push([fmtDH(r.assinatura.em),r.numero,r.cliente,tecDoReg(r),nomeTipos(r),nomesCat(r),pag].map(q).join(';'));
   });
   var blob=new Blob(['﻿'+L.join('\r\n')],{type:'text/csv;charset=utf-8'});
   var a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='servicos-por-tecnico-'+REL.mes+'.csv';
