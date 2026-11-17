@@ -398,6 +398,7 @@ async function verPeriodo(de,ate){
   else toast(tem.length+' entrega'+(tem.length===1?'':'s')+' no período');
   filtrar(tem[0]||de);
 }
+function diaDe(ms){var d=new Date(ms);return d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate());}
 function diaMais(n){var d=new Date((S.hoje||hojeISO())+'T12:00:00');d.setDate(d.getDate()+n);return d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate());}
 function prev(o){return String(o.dataPrevista||'').slice(0,10);}
 var DIAS_SEM=['dom','seg','ter','qua','qui','sex','sáb'];
@@ -479,13 +480,15 @@ function itensResumo(o){
   return'<div class="its-l">'+h+'</div>';
 }
 function idsAssinados(){return Object.keys(S.reg).filter(function(id){return!!S.reg[id].assinatura;});}
+/* Concluídos cujo relatório o comercial ainda não mandou ao cliente. */
+function idsAEnviar(){return idsAssinados().filter(function(id){var e=S.reg[id].envio;return!(e&&e.ok);});}
 /* Concluído = relatório gerado (o cliente assinou). */
 function concluido(id){var r=S.reg[String(id)];return!!(r&&r.assinatura);}
 function statusReg(id){
   var r=S.reg[String(id)];
   if(!r)return'';
-  if(r.envio&&r.envio.ok)return'<span class="badge b-green">✔ Concluído · enviado</span>';
-  if(r.assinatura)return'<span class="badge b-green">✔ Concluído</span> <span class="badge b-amber">WhatsApp não enviado</span>';
+  if(r.envio&&r.envio.ok)return'<span class="badge b-green">✔ Concluído · enviado ao cliente</span>';
+  if(r.assinatura)return'<span class="badge b-green">✔ Concluído</span>'+(ehTec()?'':' <span class="badge b-amber">📄 relatório a enviar</span>');
   return'<span class="badge b-gray">Em atendimento</span>';
 }
 function renderLista(){
@@ -495,12 +498,13 @@ function renderLista(){
   var rolagem=window.scrollY;
   $('top').innerHTML='<h1>🚚 Entregas</h1>'+whoBtn();
   var dl=datasDaLista();
-  if(S.filtro!=='feitas'&&dl.datas.indexOf(S.filtro)<0)S.filtro=dataPadrao(dl.datas.filter(function(d){return dl.cont[d];}).length?dl.datas.filter(function(d){return dl.cont[d];}):dl.datas);
+  if(S.filtro!=='feitas'&&S.filtro!=='aenviar'&&dl.datas.indexOf(S.filtro)<0)S.filtro=dataPadrao(dl.datas.filter(function(d){return dl.cont[d];}).length?dl.datas.filter(function(d){return dl.cont[d];}):dl.datas);
   var h='<input class="search" id="busca" placeholder="Buscar nº do pedido ou cliente" value="'+esc(S.busca)+'" oninput="S.busca=this.value;desenharItens()"/>'
     +'<div class="chips" id="chips-datas">'
     +dl.datas.map(function(d){var ano=d.slice(0,4)!==(S.hoje||hojeISO()).slice(0,4)?'/'+d.slice(2,4):'';return'<button class="chip'+(S.filtro===d?' on':'')+'" data-d="'+d+'" onclick="filtrar(\''+d+'\')">'+esc(rotuloDia(d))+ano+' ('+dl.cont[d]+')</button>';}).join('')
     +'<button class="chip" onclick="abrirPeriodo()">📅 Outro período</button>'
     +'</div><div class="chips" id="chips-tec"></div><div class="chips">'
+    +(ehTec()?'':'<button class="chip'+(S.filtro==='aenviar'?' on':'')+'" onclick="filtrar(\'aenviar\')">📄 Relatórios a enviar ('+idsAEnviar().length+')</button>')
     +'<button class="chip'+(S.filtro==='feitas'?' on':'')+'" onclick="filtrar(\'feitas\')">✍️ Assinados ('+idsAssinados().length+')</button>'
     +'<button class="chip" onclick="carregarLista()">'+(S.carregando?'<span class="spin"></span>':'↻')+' Atualizar</button>'
     +(ehTec()?'':'<button class="chip" onclick="abrirRelatorio()">📊 Serviços por técnico</button>')
@@ -539,13 +543,15 @@ function desenharItens2(el){
   if(busca){
     /* Busca procura em todas as datas, não só na escolhida. */
     lista=lista.filter(function(o){return semAcento([o.numero,o.cliente].join(' ')).indexOf(q)>=0;});
-  }else if(S.filtro==='feitas'){
-    lista=idsAssinados().map(function(id){var r=S.reg[id];return{id:Number(id),numero:r.numero,cliente:r.cliente,total:r.total,dataPrevista:r.pedido&&r.pedido.dataPrevista,_em:r.atualizadoEm};})
+  }else if(S.filtro==='feitas'||S.filtro==='aenviar'){
+    /* Separados por dia da assinatura, do mais recente para o mais antigo. */
+    lista=(S.filtro==='aenviar'?idsAEnviar():idsAssinados()).map(function(id){var r=S.reg[id],ped=r.pedido||{};
+        return{id:Number(id),numero:r.numero,cliente:r.cliente,total:r.total,dataPrevista:ped.dataPrevista,vendedor:ped.vendedor,_em:r.assinatura.em,_dia:diaDe(r.assinatura.em)};})
       .sort(function(a,b){return(b._em||0)-(a._em||0);});
   }else{
     lista=lista.filter(function(o){return prev(o)===S.filtro;});
   }
-  var abas=$('chips-tec'),porData=!busca&&S.filtro!=='feitas';
+  var abas=$('chips-tec'),porData=!busca&&S.filtro!=='feitas'&&S.filtro!=='aenviar';
   if(ehTec())S.aba=S.tecnico;
   if(abas){abas.style.display=porData&&!ehTec()?'':'none';if(porData&&!ehTec())abas.innerHTML=abasHtml(lista);}
   var topo='';
@@ -565,19 +571,22 @@ function desenharItens2(el){
     }
   }
   if(!lista.length){
-    var msg=S.carregando||!S.lista?'':!busca&&/^\d{4}-/.test(S.filtro)&&!lista.length&&!(porData&&(ehTec()||S.aba))?'Nenhuma entrega com data prevista em '+fmtData(S.filtro)+'.':porData&&ehTec()?'Nenhuma entrega marcada para você. O comercial define as entregas de cada técnico.':porData&&S.aba?(S.aba==='__sem'?'Todas as entregas desta data já têm técnico.':'Nenhuma entrega marcada para '+esc(S.aba)+' nesta data. Marque o técnico em cada pedido na aba "Todos".'):S.filtro==='feitas'&&!busca?'Nenhum pedido assinado ainda.':busca?'Nenhum pedido encontrado.':'Nenhuma entrega prevista de 7 dias atrás em diante.';
+    var msg=S.carregando||!S.lista?'':!busca&&/^\d{4}-/.test(S.filtro)&&!lista.length&&!(porData&&(ehTec()||S.aba))?'Nenhuma entrega com data prevista em '+fmtData(S.filtro)+'.':porData&&ehTec()?'Nenhuma entrega marcada para você. O comercial define as entregas de cada técnico.':porData&&S.aba?(S.aba==='__sem'?'Todas as entregas desta data já têm técnico.':'Nenhuma entrega marcada para '+esc(S.aba)+' nesta data. Marque o técnico em cada pedido na aba "Todos".'):S.filtro==='aenviar'&&!busca?'Nenhum relatório pendente de envio ✔':S.filtro==='feitas'&&!busca?'Nenhum pedido assinado ainda.':busca?'Nenhum pedido encontrado.':'Nenhuma entrega prevista de 7 dias atrás em diante.';
     el.innerHTML=topo+(msg?'<div class="empty">'+msg+'</div>':'');return;
   }
+  var diaAnt=null;
   el.innerHTML=topo+lista.map(function(o){
-    var d=prev(o);
-    return'<div class="card os'+(concluido(o.id)?' feito':'')+'" onclick="abrirPedido('+o.id+')">'
+    var d=prev(o),cab='';
+    if(o._dia&&o._dia!==diaAnt){diaAnt=o._dia;var n=lista.filter(function(x){return x._dia===o._dia;}).length;
+      cab='<div class="sec" style="margin:16px 2px 8px;">'+esc(rotuloDia(o._dia))+(o._dia.slice(0,4)!==(S.hoje||hojeISO()).slice(0,4)?'/'+o._dia.slice(2,4):'')+' · '+n+' atendimento'+(n===1?'':'s')+'</div>';}
+    return cab+'<div class="card os'+(concluido(o.id)?' feito':'')+'" onclick="abrirPedido('+o.id+')">'
       +'<div class="os-num">'+(o._rota&&S.aba?'<div class="ord">'+o._rota.n+'º</div><div class="sub">'+esc(o._rota.h)+'</div>':'')+esc(o.numero||'s/ nº')+'</div>'
       +'<div class="os-main"><div class="t">'+esc(o.cliente||'Cliente')+'</div>'
-      +'<div class="s">'+(o.total?money(o.total):'')+((busca||S.filtro==='feitas')&&d?' · entrega '+fmtData(d):'')+'</div>'
+      +'<div class="s">'+(o.total?money(o.total):'')+((busca||S.filtro==='feitas'||S.filtro==='aenviar')&&d?' · entrega '+fmtData(d):'')+'</div>'
       +(o.vendedor?'<div class="vend">Vendedor: <b>'+esc(o.vendedor)+'</b></div>':'')
       +itensResumo(o)
       +tempoHtml(o)
-      +'<div class="badges">'+(o._em?'<span class="badge b-gray">'+fmtDH(o._em)+'</span>':'')+statusReg(o.id)+'</div>'
+      +'<div class="badges">'+(o._em?'<span class="badge b-gray">assinado '+(o._dia?fmtDH(o._em).slice(11):fmtDH(o._em))+'</span>':'')+statusReg(o.id)+'</div>'
       +atrHtml(o)+'</div></div>';
   }).join('');
 }
@@ -1027,24 +1036,32 @@ function renderPedido(){
     +'<div class="field"><label>Quem recebeu / assinou <span class="req">*</span></label><input id="rec-nome" value="'+esc(r.recebedor?r.recebedor.nome:(c.nome||''))+'"'+trava+' onchange="salvarCampos()"/></div>'
     +'</div>';
 
-  /* Assinatura e envio */
+  /* Assinatura. O técnico só salva o relatório; o comercial confere e, se
+     quiser, envia ao cliente pelo WhatsApp Web. */
   var fones=[c.celular,c.telefone].filter(function(t){return soDig(t).length>=10;});
-  h+='<div class="card"><div class="sec">Assinatura e envio</div>';
+  h+='<div class="card"><div class="sec">Assinatura'+(ehTec()?'':' e envio ao cliente')+'</div>';
   if(assinado){
-    var a=r.assinatura;
+    var a=r.assinatura,env=r.envio&&r.envio.ok?r.envio:null;
     h+='<div class="sig-img"><img src="'+a.img+'"/></div>'
       +'<div class="sub" style="margin:6px 0 12px;">Assinado por <b>'+esc(r.recebedor&&r.recebedor.nome||'-')+'</b> em '+fmtDH(a.em)
       +(r.local&&r.local.lat?' · 📍 '+r.local.lat.toFixed(5)+', '+r.local.lng.toFixed(5):' · sem localização')+'</div>';
-    if(r.envio&&!r.envio.ok&&r.envio.erro)h+='<div class="err">Último envio falhou: '+esc(r.envio.erro)+'</div>';
-    if(fones.length>1)h+='<div class="field"><label>Enviar para</label><select id="fone">'+fones.map(function(t){return'<option value="'+esc(t)+'">'+esc(fmtFone(t))+'</option>';}).join('')+'</select></div>';
-    else if(fones.length)h+='<input type="hidden" id="fone" value="'+esc(fones[0])+'"/>';
-    else h+='<div class="err">O cliente não tem telefone no cadastro do Bling. Use "Enviar pelo celular" ou peça ao escritório para atualizar o cadastro.</div>';
-    h+=(fones.length?'<button class="btn btn-ok btn-lg" id="b-env" onclick="enviarWhats()"'+(S.enviando?' disabled':'')+'>'+(S.enviando?'<span class="spin"></span> Enviando…':(r.envio&&r.envio.ok?'Enviar de novo pelo WhatsApp':'📲 Enviar pedido assinado no WhatsApp'))+'</button>':'')
-      +'<div class="actions"><button class="btn btn-g" onclick="compartilhar()">📤 Enviar pelo celular</button><button class="btn btn-g" onclick="verPdf()">👁 Ver PDF</button></div>'
-      +(r.envio&&r.envio.ok?'':'<div class="actions"><button class="btn btn-g btn-sm" onclick="desfazerAssin()">Refazer assinatura</button></div>');
+    if(ehTec()){
+      h+='<div class="okbox">✔ Relatório salvo. O comercial confere e envia ao cliente.</div>'
+        +'<div class="actions"><button class="btn btn-g" onclick="verPdf()">👁 Ver relatório (PDF)</button></div>';
+    }else{
+      h+=(env?'<div class="okbox">✔ Enviado ao cliente'+(env.via==='whatsapp-web'?' pelo WhatsApp Web':'')+(env.telefone?' ('+esc(fmtFone(String(env.telefone).replace(/^55/,'')))+')':'')+' por '+esc(env.por||'-')+' em '+fmtDH(env.em)+'.</div>'
+          :'<div class="info">📄 Confira o relatório e envie ao cliente pelo WhatsApp Web.</div>')
+        +'<div class="actions"><button class="btn btn-g" onclick="verPdf()">👁 Conferir relatório (PDF)</button></div>';
+      if(fones.length>1)h+='<div class="field" style="margin-top:10px;"><label>Enviar para</label><select id="fone">'+fones.map(function(t){return'<option value="'+esc(t)+'">'+esc(fmtFone(t))+'</option>';}).join('')+'</select></div>';
+      else if(fones.length)h+='<input type="hidden" id="fone" value="'+esc(fones[0])+'"/>';
+      else h+='<div class="err" style="margin-top:10px;">O cliente não tem telefone no cadastro do Bling. Baixe o PDF e envie manualmente.</div>';
+      h+=(fones.length?'<button class="btn btn-ok btn-lg" style="margin-top:10px;" onclick="enviarWhatsWeb()">🟢 '+(env?'Enviar de novo':'Enviar')+' pelo WhatsApp Web</button>':'')
+        +'<div class="actions"><button class="btn btn-g" onclick="baixarPdf()">⬇ Baixar PDF</button>'+(navigator.share?'<button class="btn btn-g" onclick="compartilhar()">📤 Enviar pelo celular</button>':'')+'</div>';
+    }
+    if(!(r.envio&&r.envio.ok))h+='<div class="actions"><button class="btn btn-g btn-sm" onclick="desfazerAssin()">Refazer assinatura</button></div>';
   }else{
     h+='<div class="sub" style="margin-bottom:10px;">Confira as fotos e observações. Depois da assinatura o registro fica travado.</div>'
-      +'<button class="btn btn-p btn-lg" onclick="assinar()">✍️ Cliente assinar</button>';
+      +'<button class="btn btn-p btn-lg" onclick="assinar()">✍️ Cliente assinar e salvar</button>';
   }
   h+='</div>';
   $('app').innerHTML=h;
@@ -1359,8 +1376,7 @@ async function confirmarAssin(){
   await salvarCampos({assinatura:a,local:LOCAL||null,tecnicoEntrega:tecDe(S.ped.id)||S.tecnico}).catch(function(e){toast('Erro ao salvar: '+e.message);});
   if(LOCAL)gravarLocal(LOCAL,LOCAL.em,'assinatura',{pedido:S.ped.numero||'',cliente:(S.ped.cliente&&S.ped.cliente.nome)||''});
   renderPedido();
-  toast('Assinatura salva');
-  if($('b-env'))enviarWhats();
+  toast('Relatório salvo ✔');
 }
 function desfazerAssin(){
   if(!confirm('Apagar a assinatura e colher de novo?'))return;
@@ -1453,11 +1469,11 @@ function pdfRodape(doc,nowStr){
 }
 async function montarPdf(){
   await carregarJsPDF();
-  var o=S.ped,r=regAtual(),c=o.cliente||{},a=r.assinatura||{};
+  var o=S.ped,r=regAtual(),tecPdf=r.tecnicoEntrega||tecDe(o.id)||r.tecnico||S.tecnico,c=o.cliente||{},a=r.assinatura||{};
   var doc=new window.jspdf.jsPDF();
   var ML=14,MR=196,az=PURIFIC.azul;
   var y=pdfCabecalho(doc,'PEDIDO DE VENDA','Comprovante de entrega · assinado digitalmente',[
-    ['N° Pedido',o.numero||'-'],['Atendimento',fmtDH(a.em||Date.now())],['Técnico',S.tecnico]
+    ['N° Pedido',o.numero||'-'],['Atendimento',fmtDH(a.em||Date.now())],['Técnico',tecPdf]
   ]);
   function chk(n){if(y+n>272)y=pdfNovaPagina(doc);}
   function section(t){
@@ -1554,7 +1570,7 @@ async function montarPdf(){
   doc.setDrawColor(70,70,70);doc.setLineWidth(0.35);doc.line(cx1-36,base,cx1+36,base);doc.line(cx2-36,base,cx2+36,base);
   doc.setFont('helvetica','bold');doc.setFontSize(8.5);doc.setTextColor(az[0],az[1],az[2]);
   var rec=r.recebedor||{};
-  doc.text(rec.nome||c.nome||'Cliente',cx1,base+5,{align:'center'});doc.text(S.tecnico,cx2,base+5,{align:'center'});
+  doc.text(rec.nome||c.nome||'Cliente',cx1,base+5,{align:'center'});doc.text(tecPdf,cx2,base+5,{align:'center'});
   doc.setFont('helvetica','normal');doc.setFontSize(6.5);doc.setTextColor(140,140,140);
   doc.text('Recebedor',cx1,base+9,{align:'center'});
   doc.text('Técnico · '+PURIFIC.nome,cx2,base+9,{align:'center'});
@@ -1587,25 +1603,29 @@ async function compartilhar(){
     }
   }catch(e){if(e&&e.name!=='AbortError')alert('Não foi possível compartilhar: '+e.message);}
 }
-function blobParaDataUrl(b){return new Promise(function(ok,fail){var fr=new FileReader();fr.onload=function(){ok(fr.result);};fr.onerror=function(){fail(new Error('Falha ao ler o PDF'));};fr.readAsDataURL(b);});}
-async function enviarWhats(){
-  if(S.enviando)return;
-  var fone=val('fone');
-  S.enviando=true;renderPedido();
-  var id=String(S.ped.id);
+async function baixarPdf(){
   try{
-    var doc=await montarPdf();
-    var pdf=await blobParaDataUrl(doc.output('blob'));
-    var resp=await api('/api/bling/campo/enviar',{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({pedidoId:S.ped.id,telefone:fone,pdf:pdf,tecnico:S.tecnico})});
-    await salvarCampos({envio:{ok:true,em:Date.now(),telefone:resp.telefone,via:resp.via,por:S.tecnico}}).catch(function(){});
-    toast('Pedido enviado para o WhatsApp do cliente ✔');
-  }catch(e){
-    await salvarCampos({envio:{ok:false,em:Date.now(),erro:e.message,por:S.tecnico}}).catch(function(){});
-    alert('Não foi possível enviar pelo número da loja:\n\n'+e.message+'\n\nUse "Enviar pelo celular" para mandar agora pelo WhatsApp do aparelho.');
-  }
-  S.enviando=false;
-  if(S.tela==='ped'&&String(S.ped.id)===id)renderPedido();
+    var doc=await montarPdf(),a=document.createElement('a');a.href=URL.createObjectURL(doc.output('blob'));a.download=nomePdf();
+    document.body.appendChild(a);a.click();a.remove();setTimeout(function(){URL.revokeObjectURL(a.href);},5000);
+    return true;
+  }catch(e){alert('Erro ao gerar o PDF: '+e.message);return false;}
+}
+/* Baixa o PDF e abre a conversa do cliente no WhatsApp Web com a mensagem
+   pronta; o comercial anexa o arquivo (📎) e envia. Fica marcado como enviado. */
+async function enviarWhatsWeb(){
+  var d=soDig(val('fone'));if(d.length===10||d.length===11)d='55'+d;
+  if(d.length<12){toast('Telefone do cliente inválido');return;}
+  var c=S.ped.cliente||{},nome=String(c.nome||'').trim().split(/\s+/)[0]||'';
+  nome=nome?nome.charAt(0).toUpperCase()+nome.slice(1).toLowerCase():'';
+  var txt='Olá'+(nome?' '+nome:'')+', tudo bem? Aqui é da Purific 💧\nSegue em anexo o relatório do atendimento do seu pedido nº '+(S.ped.numero||'')+', assinado no dia '+fmtDH(regAtual().assinatura.em).slice(0,10)+'. Qualquer dúvida, estou à disposição!';
+  var celular=/Android|iPhone|iPad|Mobi/i.test(navigator.userAgent);
+  var url=(celular?'https://wa.me/':'https://web.whatsapp.com/send?phone=')+d+(celular?'?text=':'&text=')+encodeURIComponent(txt);
+  var jan=window.open('about:blank','_blank');
+  if(!(await baixarPdf())){if(jan)jan.close();return;}
+  if(jan)jan.location.href=url;else window.open(url,'_blank');
+  await salvarCampos({envio:{ok:true,via:'whatsapp-web',telefone:d,por:S.tecnico,em:Date.now()}}).catch(function(){});
+  renderPedido();
+  alert('O PDF "'+nomePdf()+'" foi baixado e a conversa do cliente foi aberta no WhatsApp Web.\n\nNa conversa, clique no clipe (📎), escolha o PDF e envie.');
 }
 
 /* ═══ Localização do técnico ════════════════════════════════════════════
