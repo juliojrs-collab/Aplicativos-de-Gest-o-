@@ -209,7 +209,7 @@ function fotosDe(g){return S.midias.filter(function(m){return(m.grupo||'depois')
    impressas no PDF. A observação de cada uma é opcional. */
 /* Tipo de serviço, marcado pelo técnico (um ou mais). Define quais
    perguntas aparecem: "naoEm" tira a pergunta quando o tipo está marcado. */
-var TIPOS=[{k:'refil',l:'Troca de refil'},{k:'hig',l:'Higienização'},{k:'semagua',l:'Aparelho sem água'},{k:'instalacao',l:'Instalação nova'},{k:'outro',l:'Outro'}];
+var TIPOS=[{k:'refil',l:'Troca de refil'},{k:'hig',l:'Higienização'},{k:'semagua',l:'Aparelho sem água'},{k:'instalacao',l:'Instalação nova'},{k:'visita',l:'Visita técnica'},{k:'outro',l:'Outro'}];
 var CHECK=[
   {k:'higienizacao',p:'O aparelho precisa de higienização?',o:['Sim','Não','Feita neste atendimento'],obs:'Observação (opcional)',naoEm:['instalacao']},
   {k:'pressao',p:'Qual a pressão do local?',valor:'kgf/cm²'},
@@ -594,12 +594,13 @@ function desenharItens2(el){
 /* ═══ Serviços por técnico (relatório do comercial) ════════════════════════
    Conta os atendimentos concluídos (relatório assinado) no mês, por técnico.
    Cada atendimento (um pedido, quase sempre um aparelho) conta uma vez só,
-   no serviço principal: instalação > higienização > sem água > refil > outro.
+   no serviço principal: instalação > higienização > sem água > visita técnica > refil > outro.
    Ex.: refil + higienização conta como higienização, sem somar o refil. */
 var CATEGORIAS=[
   {k:'instalacao',l:'Instalação'},
   {k:'hig',l:'Higienização'},
   {k:'semagua',l:'Aparelho sem água'},
+  {k:'visita',l:'Visita técnica'},
   {k:'refil',l:'Troca/entrega de refil'},
   {k:'outro',l:'Outro'}
 ];
@@ -651,7 +652,7 @@ function renderRelatorio(){
   var h='<div class="card"><div style="display:flex;align-items:center;gap:8px;justify-content:space-between;">'
     +'<button class="btn btn-g btn-sm" onclick="mudarMes(-1)">‹ Anterior</button><b style="font-size:16px;text-transform:capitalize;">'+nomeMes(REL.mes)+'</b>'
     +'<button class="btn btn-g btn-sm" onclick="mudarMes(1)"'+(REL.mes>=mesAtual()?' disabled':'')+'>Próximo ›</button></div>'
-    +'<div class="sub" style="margin-top:6px;">Atendimentos concluídos (relatório assinado) no mês. Cada atendimento conta uma vez, no serviço principal: instalação › higienização › aparelho sem água › troca/entrega de refil › outro. Ex.: refil + higienização conta só como higienização.</div></div>';
+    +'<div class="sub" style="margin-top:6px;">Atendimentos concluídos (relatório assinado) no mês. Cada atendimento conta uma vez, no serviço principal: instalação › higienização › aparelho sem água › visita técnica › troca/entrega de refil › outro. Ex.: refil + higienização conta só como higienização.</div></div>';
   if(REL.carregando){$('app').innerHTML=h+'<div class="empty"><span class="spin"></span> Contando…</div>';return;}
   if(REL.erro)h+='<div class="err">Não foi possível ler os atendimentos: '+esc(REL.erro)+'</div>';
   var t=tabelaRel(),nomeCol=tipoNome;
