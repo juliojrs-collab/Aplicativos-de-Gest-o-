@@ -595,7 +595,7 @@ function renderLista(){
     +(ehTec()||!idsVendas().length?'':'<button class="chip'+(S.filtro==='vendas'?' on':'')+'" onclick="filtrar(\'vendas\')">💰 Vendas no local ('+idsVendas().filter(function(id){return vendaSemPreco(S.reg[id]);}).length+' sem preço)</button>')
     +'<button class="chip'+(S.filtro==='feitas'?' on':'')+'" onclick="filtrar(\'feitas\')">✍️ Assinados ('+idsAssinados().length+')</button>'
     +'<button class="chip" onclick="carregarLista()">'+(S.carregando?'<span class="spin"></span>':'↻')+' Atualizar</button>'
-    +(ehTec()?'':'<button class="chip" onclick="abrirRelatorio()">📊 Serviços por técnico</button>')
+    +(ehTec()?'':'<button class="chip" onclick="abrirRelatorio()">📊 Serviços e vendas por técnico</button>')
     +(ehTec()?'':'<a class="chip" style="text-decoration:none;" href="mapa/" target="_blank" rel="noopener">📍 Mapa dos técnicos</a>')+'</div>'
     +(ehTec()?'':'<div class="chips"><button class="chip'+(S.visao==='lista'?' on':'')+'" onclick="mudarVisao(\'lista\')">📋 Lista</button><button class="chip'+(S.visao==='quadro'?' on':'')+'" onclick="mudarVisao(\'quadro\')">🗂️ Quadro por técnico</button></div>');
   if(S.listaErr)h+='<div class="err">Não foi possível buscar os pedidos no Bling: '+esc(S.listaErr)+'</div>';
@@ -747,12 +747,20 @@ async function carregarRelatorio(){
   REL.carregando=true;REL.erro='';renderRelatorio();
   var p=REL.mes.split('-').map(Number),ini=new Date(p[0],p[1]-1,1).getTime(),fim=new Date(p[0],p[1],1).getTime(),mes=REL.mes;
   try{
-    var snap=await db.collection(C_REG).where('assinatura.em','>=',ini).where('assinatura.em','<',fim).get();
+    /* Vendas no local contam pelo dia da venda; quem registra uma venda grava
+       atualizadoEm, então todo registro com venda no mês tem atualizadoEm >= ini. */
+    var res=await Promise.all([
+      db.collection(C_REG).where('assinatura.em','>=',ini).where('assinatura.em','<',fim).get(),
+      db.collection(C_REG).where('atualizadoEm','>=',ini).get()]);
     if(mes!==REL.mes)return;
-    REL.itens=snap.docs.map(function(d){var r=d.data();r.id=d.id;return r;})
+    REL.itens=res[0].docs.map(function(d){var r=d.data();r.id=d.id;return r;})
       .filter(function(r){return r.assinatura&&r.assinatura.em>=ini&&r.assinatura.em<fim;})
       .sort(function(a,b){return a.assinatura.em-b.assinatura.em;});
-  }catch(e){REL.erro=e.message;REL.itens=[];}
+    REL.vendas=[];
+    res[1].docs.forEach(function(d){var r=d.data();r.id=d.id;
+      (r.vendas||[]).forEach(function(v){if(v.em>=ini&&v.em<fim)REL.vendas.push({r:r,v:v});});});
+    REL.vendas.sort(function(a,b){return a.v.em-b.v.em;});
+  }catch(e){REL.erro=e.message;REL.itens=[];REL.vendas=[];}
   REL.carregando=false;
   if(S.tela==='rel')renderRelatorio();
 }
@@ -770,8 +778,40 @@ function tabelaRel(){
   var nomes=S.tecsRua.slice();Object.keys(por).forEach(function(n){if(nomes.indexOf(n)<0)nomes.push(n);});
   return{por:por,tot:tot,cols:cols,nomes:nomes};
 }
+/* Vendas no local por técnico: quem registrou a venda (se for um técnico de
+   rua), senão o técnico do atendimento. */
+function tecDaVenda(x){return S.tecsRua.indexOf(x.v.por)>=0?x.v.por:tecDoReg(x.r);}
+function valorVenda(v){return v.preco>0?v.preco*(v.qtd||1):0;}
+function tabelaVendas(){
+  var por={},tot={n:0,ped:{},valor:0,semPreco:0,bling:0};
+  (REL.vendas||[]).forEach(function(x){
+    var t=tecDaVenda(x),l=por[t]=por[t]||{n:0,ped:{},valor:0,semPreco:0,bling:0};
+    [l,tot].forEach(function(o){o.n++;o.ped[x.r.id]=1;o.valor+=valorVenda(x.v);if(!(x.v.preco>0))o.semPreco++;if(x.v.bling)o.bling+=valorVenda(x.v);});
+  });
+  var nomes=S.tecsRua.slice();Object.keys(por).forEach(function(n){if(nomes.indexOf(n)<0)nomes.push(n);});
+  return{por:por,tot:tot,nomes:nomes};
+}
+var VAZIO_VD={n:0,ped:{},valor:0,semPreco:0,bling:0};
+function vendasRelHtml(){
+  var t=tabelaVendas(),vs=REL.vendas||[];
+  function linha(rot,l,cls){return'<tr'+(cls?' class="'+cls+'"':'')+'><td>'+rot+'</td><td class="'+(Object.keys(l.ped).length?'':'z')+'">'+Object.keys(l.ped).length+'</td><td class="'+(l.n?'':'z')+'">'+l.n+'</td>'
+    +'<td class="'+(l.valor?'':'z')+'"><b>'+money(l.valor)+'</b></td><td class="'+(l.bling?'':'z')+'">'+money(l.bling)+'</td><td class="'+(l.semPreco?'':'z')+'">'+(l.semPreco||0)+'</td></tr>';}
+  var h='<div class="card tw"><div class="sec">💰 Vendas no local</div>'
+    +'<div class="sub" style="margin-bottom:8px;">Serviços, peças e produtos vendidos pelos técnicos nos atendimentos, pela data da venda. O valor é o preço posto pelo comercial; itens sem preço não somam.</div>'
+    +'<table class="rel-t"><thead><tr><th>Técnico</th><th>Atendimentos com venda</th><th>Itens vendidos</th><th>Valor</th><th>Lançado no Bling</th><th>Sem preço</th></tr></thead><tbody>'
+    +t.nomes.map(function(n){return linha('👷 '+esc(n),t.por[n]||VAZIO_VD);}).join('')
+    +linha('Total',t.tot,'tot')+'</tbody></table>';
+  if(vs.length)h+='<div style="margin-top:10px;">'+vs.map(function(x){var v=x.v,r=x.r;
+      return'<div style="padding:8px 0;border-bottom:1px solid var(--border);cursor:pointer;" onclick="abrirPedido('+Number(r.id)+')">'
+        +'<b>'+(v.qtd||1)+'× '+esc(v.desc)+'</b> <span class="sub">· '+fmtDH(v.em)+'</span>'
+        +'<div class="sub">👷 '+esc(tecDaVenda(x))+' · pedido '+esc(r.numero||'')+' · '+esc(r.cliente||'')+' · '
+        +(v.preco>0?'<b>'+money(valorVenda(v))+'</b>':'<span class="badge b-amber">sem preço</span>')
+        +(v.bling?' · ✔ Bling '+(v.bling.modo==='mesmo'?'no mesmo pedido':'pedido nº '+esc(v.bling.numero||'')):'')+'</div></div>';}).join('')+'</div>';
+  else h+='<div class="sub" style="margin-top:8px;">Nenhuma venda no local em '+nomeMes(REL.mes)+'.</div>';
+  return h+'</div>';
+}
 function renderRelatorio(){
-  $('top').innerHTML='<button class="back" onclick="history.back()">‹</button><h1>📊 Serviços por técnico</h1>'+whoBtn();
+  $('top').innerHTML='<button class="back" onclick="history.back()">‹</button><h1>📊 Serviços e vendas por técnico</h1>'+whoBtn();
   var h='<div class="card"><div style="display:flex;align-items:center;gap:8px;justify-content:space-between;">'
     +'<button class="btn btn-g btn-sm" onclick="mudarMes(-1)">‹ Anterior</button><b style="font-size:16px;text-transform:capitalize;">'+nomeMes(REL.mes)+'</b>'
     +'<button class="btn btn-g btn-sm" onclick="mudarMes(1)"'+(REL.mes>=mesAtual()?' disabled':'')+'>Próximo ›</button></div>'
@@ -782,7 +822,8 @@ function renderRelatorio(){
   h+='<div class="card tw"><table class="rel-t"><thead><tr><th>Técnico</th>'+t.cols.map(function(k){return'<th>'+esc(nomeCol(k))+'</th>';}).join('')+'<th>Atendimentos</th></tr></thead><tbody>'
     +t.nomes.map(function(n){var l=t.por[n]||{_n:0};return'<tr><td>👷 '+esc(n)+'</td>'+t.cols.map(function(k){return'<td class="'+(l[k]?'':'z')+'">'+(l[k]||0)+'</td>';}).join('')+'<td><b>'+l._n+'</b></td></tr>';}).join('')
     +'<tr class="tot"><td>Total</td>'+t.cols.map(function(k){return'<td>'+(t.tot[k]||0)+'</td>';}).join('')+'<td>'+t.tot._n+'</td></tr></tbody></table>'
-    +'<div class="actions"><button class="btn btn-g" onclick="baixarRelatorio()"'+((REL.itens||[]).length?'':' disabled')+'>⬇ Baixar planilha</button></div></div>';
+    +'<div class="actions"><button class="btn btn-g" onclick="baixarRelatorio()"'+((REL.itens||[]).length||(REL.vendas||[]).length?'':' disabled')+'>⬇ Baixar planilha</button></div></div>';
+  h+=vendasRelHtml();
   if((REL.itens||[]).length){
     h+='<div class="card"><div class="sec">Atendimentos do mês ('+REL.itens.length+')</div>'
       +REL.itens.map(function(r){return'<div style="padding:8px 0;border-bottom:1px solid var(--border);cursor:pointer;" onclick="abrirPedido('+Number(r.id)+')">'
@@ -804,8 +845,17 @@ function baixarRelatorio(){
     var pg=r.pagamento||{},pag=pg.feito==='Sim'?(pg.forma||'')+(pg.parcelas&&pg.parcelas!=='À vista'?' '+pg.parcelas:''):pg.feito==='Não'?'Não pago no local':'';
     L.push([fmtDH(r.assinatura.em),r.numero,r.cliente,tecDoReg(r),nomeTiposTodos(r),nomesCat(r),pag].map(q).join(';'));
   });
+  var tv=tabelaVendas(),num=function(v){return(Math.round(v*100)/100).toFixed(2).replace('.',',');};
+  L.push('');L.push(q('Vendas no local — '+nomeMes(REL.mes)));
+  L.push(['Técnico','Atendimentos com venda','Itens vendidos','Valor (R$)','Lançado no Bling (R$)','Sem preço'].map(q).join(';'));
+  tv.nomes.concat(['Total']).forEach(function(n){var l=n==='Total'?tv.tot:(tv.por[n]||VAZIO_VD);
+    L.push([q(n),Object.keys(l.ped).length,l.n,num(l.valor),num(l.bling),l.semPreco].join(';'));});
+  L.push('');L.push(['Data','Pedido','Cliente','Técnico','Item','Qtd','Preço unit. (R$)','Total (R$)','Lançado no Bling'].map(q).join(';'));
+  (REL.vendas||[]).forEach(function(x){var v=x.v;
+    L.push([q(fmtDH(v.em)),q(x.r.numero),q(x.r.cliente),q(tecDaVenda(x)),q(v.desc),v.qtd||1,v.preco>0?num(v.preco):'',v.preco>0?num(valorVenda(v)):'',
+      q(v.bling?(v.bling.modo==='mesmo'?'mesmo pedido':'pedido '+v.bling.numero):'')].join(';'));});
   var blob=new Blob(['﻿'+L.join('\r\n')],{type:'text/csv;charset=utf-8'});
-  var a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='servicos-por-tecnico-'+REL.mes+'.csv';
+  var a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='servicos-e-vendas-por-tecnico-'+REL.mes+'.csv';
   document.body.appendChild(a);a.click();a.remove();setTimeout(function(){URL.revokeObjectURL(a.href);},5000);
 }
 
