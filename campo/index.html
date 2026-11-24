@@ -283,7 +283,7 @@ function rotuloFoto(g,r){
   return'Foto do aparelho depois do serviço';
 }
 /* Pagamento na entrega: obrigatório dizer se foi feito e, se sim, a forma. */
-var FORMAS_PAG=['Pix','Crédito','Débito'],PARCELAS=['À vista','2x','3x','4x','5x','6x','7x','8x','9x','10x','11x','12x'];
+var FORMAS_PAG=['Pix QR Code','Pix CNPJ','Crédito','Débito'],PARCELAS=['À vista','2x','3x','4x','5x','6x','7x','8x','9x','10x','11x','12x'];
 var TERMO='Declaro que recebi nesta data os produtos e/ou serviços descritos neste pedido, nas condições registradas acima.';
 
 /* ═══ Estado ═════════════════════════════════════════════════════════════ */
@@ -1481,7 +1481,7 @@ function pagHtml(pg,trava){
   var dis=trava?' disabled':'';
   function chips(id,ops,atual){return'<div class="opts" id="'+id+'">'+ops.map(function(op){return'<button type="button" class="chip'+(atual===op?' on':'')+'"'+dis+' data-v="'+esc(op)+'" onclick="pagSel(this)">'+esc(op)+'</button>';}).join('')+'</div>';}
   return'<div class="field" id="pag"><label>Pagamento feito no local? <span class="req">*</span></label>'+chips('pag-feito',['Sim','Não'],pg.feito)
-    +'<div id="pag-sim" style="margin-top:10px;'+(pg.feito==='Sim'?'':'display:none')+'"><label>Forma de pagamento <span class="req">*</span></label>'+chips('pag-forma',FORMAS_PAG,pg.forma)
+    +'<div id="pag-sim" style="margin-top:10px;'+(pg.feito==='Sim'?'':'display:none')+'"><label>Forma de pagamento <span class="req">*</span></label>'+chips('pag-forma',FORMAS_PAG.concat(pg.forma&&FORMAS_PAG.indexOf(pg.forma)<0?[pg.forma]:[]),pg.forma)
     +'<div id="pag-cred" style="margin-top:10px;'+(pg.feito==='Sim'&&pg.forma==='Crédito'?'':'display:none')+'"><label>Crédito: à vista ou em quantas vezes? <span class="req">*</span></label>'+chips('pag-parc',PARCELAS,pg.parcelas)+'</div></div>'
     +'<div id="pag-nao" style="margin-top:10px;'+(pg.feito==='Não'?'':'display:none')+'"><label>Como ficou combinado? <span class="req">*</span></label>'
     +'<input id="pag-obs" placeholder="Ex.: boleto para 30 dias, pagamento na loja…" style="font-size:14px;" value="'+esc(pg.obs||'')+'"'+dis+' onchange="salvarCampos()"/></div></div>';
