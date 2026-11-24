@@ -230,22 +230,24 @@ function fotosDe(g){return S.midias.filter(function(m){return(m.grupo||'depois')
 /* Tipo de serviço, marcado pelo técnico (um ou mais). Define quais
    perguntas aparecem: "naoEm" tira a pergunta quando o tipo está marcado. */
 var TIPOS=[{k:'refil',l:'Troca de refil'},{k:'hig',l:'Higienização'},
-  {k:'inst_purif',l:'Instalação purificador'},{k:'inst_fc',l:'Instalação FC'},{k:'carga_fc',l:'Carga FC'},
+  {k:'inst_purif',l:'Instalação purificador'},{k:'entrega_ap',l:'Entrega de aparelho'},{k:'inst_fc',l:'Instalação FC'},{k:'carga_fc',l:'Carga FC'},
   {k:'vazamento',l:'Visita Técnica (Vazamento)'},{k:'semagua',l:'Visita Técnica (Sem água)'},{k:'visita',l:'Visita Técnica (Geral)'},
   {k:'outro',l:'Outro'}];
 /* "Instalação nova" (antes de separar purificador e FC) vale como instalação de purificador. */
 var TIPO_ANTIGO={instalacao:'inst_purif'};
 /* Serviços no filtro central ou de instalação: sem as perguntas do purificador em uso. */
-var SEM_PERGUNTAS_PURIF=['inst_purif','inst_fc','carga_fc'];
+var SEM_PERGUNTAS_PURIF=['inst_purif','inst_fc','carga_fc','entrega_ap'];
 var CHECK=[
   {k:'higienizacao',p:'O aparelho precisa de higienização?',o:['Sim','Não','Feita neste atendimento'],obs:'Observação (opcional)',naoEm:SEM_PERGUNTAS_PURIF},
-  {k:'pressao',p:'Qual a pressão do local?',valor:'kgf/cm²'},
+  {k:'pressao',p:'Qual a pressão do local?',valor:'kgf/cm²',naoSo:['entrega_ap']},
   {k:'mangueiras',p:'As mangueiras estão ressecadas ou foram trocadas há mais de um ano?',o:['Sim','Não','Trocadas neste atendimento','Não verificado'],obs:'Observação (opcional)',naoEm:SEM_PERGUNTAS_PURIF}
 ];
 function tiposDe(r){return((r&&r.tipos)||[]).map(function(k){return TIPO_ANTIGO[k]||k;});}
 /* Perguntas que valem para os tipos marcados. A pressão é do local: só no
    1º aparelho (semValor nos demais). */
-function checkAtivo(tipos,semValor){return CHECK.filter(function(q){return!(semValor&&q.valor)&&!(q.naoEm||[]).some(function(t){return tipos.indexOf(t)>=0;});});}
+function checkAtivo(tipos,semValor){return CHECK.filter(function(q){return!(semValor&&q.valor)&&!(q.naoEm||[]).some(function(t){return tipos.indexOf(t)>=0;})
+    /* naoSo: some quando só esses tipos estão marcados (ex.: só entrega de aparelho, sem instalar, não mede pressão). */
+    &&!(q.naoSo&&tipos.length&&tipos.every(function(t){return q.naoSo.indexOf(t)>=0;}));});}
 /* Aparelhos do atendimento (um local pode ter mais de um). O 1º usa os campos
    de sempre (tipos, tipoOutro, checklist, aparNome e fotos 'antes'/'depois');
    os demais ficam em r.aparelhos [{id,nome,tipos,tipoOutro,checklist}], com
@@ -278,6 +280,7 @@ function rotuloFoto(g,r){
     if(g==='antes')return'Foto do local antes da instalação';
     return'Foto do '+(ip&&ifc?'purificador e do filtro':ip?'purificador':'filtro')+' instalado'+(ip&&ifc?'s':'');
   }
+  if(t.indexOf('entrega_ap')>=0)return g==='antes'?'Foto do aparelho na entrega':'Foto do aparelho entregue no local';
   if(t.indexOf('carga_fc')>=0)return g==='antes'?'Foto do filtro antes da carga':'Foto do filtro depois da carga';
   if(g==='antes')return'Foto do aparelho antes do serviço';
   return'Foto do aparelho depois do serviço';
@@ -690,6 +693,7 @@ function desenharItens2(el){
    Ex.: refil + higienização conta como higienização, sem somar o refil. */
 var CATEGORIAS=[
   {k:'inst_purif',l:'Instalação purificador'},
+  {k:'entrega_ap',l:'Entrega de aparelho'},
   {k:'inst_fc',l:'Instalação FC'},
   {k:'carga_fc',l:'Carga FC'},
   {k:'hig',l:'Higienização'},
@@ -815,7 +819,7 @@ function renderRelatorio(){
   var h='<div class="card"><div style="display:flex;align-items:center;gap:8px;justify-content:space-between;">'
     +'<button class="btn btn-g btn-sm" onclick="mudarMes(-1)">‹ Anterior</button><b style="font-size:16px;text-transform:capitalize;">'+nomeMes(REL.mes)+'</b>'
     +'<button class="btn btn-g btn-sm" onclick="mudarMes(1)"'+(REL.mes>=mesAtual()?' disabled':'')+'>Próximo ›</button></div>'
-    +'<div class="sub" style="margin-top:6px;">Atendimentos concluídos (relatório assinado) no mês. Cada coluna é uma soma separada e cada aparelho do atendimento conta separado. No purificador o aparelho conta uma vez, no serviço principal: instalação › higienização › visita técnica (sem água) › visita técnica (vazamento) › visita técnica (geral) › troca/entrega de refil › outro (ex.: refil + higienização conta só como higienização). O FC é contado à parte (instalação FC › carga FC): instalação purificador + instalação FC conta 1 em cada. Por isso a soma das colunas pode passar do nº de atendimentos.</div></div>';
+    +'<div class="sub" style="margin-top:6px;">Atendimentos concluídos (relatório assinado) no mês. Cada coluna é uma soma separada e cada aparelho do atendimento conta separado. No purificador o aparelho conta uma vez, no serviço principal: instalação › entrega de aparelho › higienização › visita técnica (sem água) › visita técnica (vazamento) › visita técnica (geral) › troca/entrega de refil › outro (ex.: refil + higienização conta só como higienização). O FC é contado à parte (instalação FC › carga FC): instalação purificador + instalação FC conta 1 em cada. Por isso a soma das colunas pode passar do nº de atendimentos.</div></div>';
   if(REL.carregando){$('app').innerHTML=h+'<div class="empty"><span class="spin"></span> Contando…</div>';return;}
   if(REL.erro)h+='<div class="err">Não foi possível ler os atendimentos: '+esc(REL.erro)+'</div>';
   var t=tabelaRel(),nomeCol=tipoNome;
