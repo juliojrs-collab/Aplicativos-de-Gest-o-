@@ -135,6 +135,12 @@ body.largo main{max-width:none;}
 .its th{font-size:11px;color:var(--text2);text-transform:uppercase;}
 .its .n{text-align:right;white-space:nowrap;}
 .photos{display:grid;grid-template-columns:repeat(auto-fill,minmax(92px,1fr));gap:8px;}
+.vd-it{display:flex;gap:8px;align-items:center;padding:8px 0;border-bottom:1px solid var(--border);}
+.vd-it .vd-d{flex:1;min-width:0;}
+.vd-it input{width:104px;font-size:14px;}
+.vd-it .x2{background:none;border:none;color:#9ca3af;font-size:16px;padding:4px 6px;cursor:pointer;}
+.vd-add{display:flex;gap:8px;margin-top:10px;}
+.vd-add input{font-size:14px;}
 .ap-box{border:1.5px solid var(--border);border-radius:var(--r2);padding:10px 10px 2px;margin-bottom:12px;}
 .ap-cab{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px;font-size:15px;}
 .ph-t{position:relative;aspect-ratio:1;border-radius:var(--r2);overflow:hidden;background:#e5e7eb;}
@@ -553,14 +559,20 @@ function itensResumo(o){
 function idsAssinados(){return Object.keys(S.reg).filter(function(id){return!!S.reg[id].assinatura;});}
 /* Concluídos cujo relatório o comercial ainda não mandou ao cliente. */
 function idsAEnviar(){return idsAssinados().filter(function(id){var e=S.reg[id].envio;return!(e&&e.ok);});}
+/* Pedidos com venda feita pelo técnico no local (não sai no relatório). */
+function idsVendas(){return Object.keys(S.reg).filter(function(id){return(S.reg[id].vendas||[]).length;});}
+function vendaSemPreco(r){return(r.vendas||[]).some(function(v){return!(v.preco>0);});}
+function filtroReg(f){return f==='feitas'||f==='aenviar'||f==='vendas';}
 /* Concluído = relatório gerado (o cliente assinou). */
 function concluido(id){var r=S.reg[String(id)];return!!(r&&r.assinatura);}
 function statusReg(id){
   var r=S.reg[String(id)];
   if(!r)return'';
-  if(r.envio&&r.envio.ok)return'<span class="badge b-green">✔ Concluído · enviado ao cliente</span>';
-  if(r.assinatura)return'<span class="badge b-green">✔ Concluído</span>'+(ehTec()?'':' <span class="badge b-amber">📄 relatório a enviar</span>');
-  return'<span class="badge b-gray">Em atendimento</span>';
+  var vd=(r.vendas||[]).length?(ehTec()?' <span class="badge b-gray">💰 venda registrada</span>'
+    :vendaSemPreco(r)?' <span class="badge b-amber">💰 venda sem preço</span>':' <span class="badge b-gray">💰 venda '+money(totalVendas(r))+'</span>'):'';
+  if(r.envio&&r.envio.ok)return'<span class="badge b-green">✔ Concluído · enviado ao cliente</span>'+vd;
+  if(r.assinatura)return'<span class="badge b-green">✔ Concluído</span>'+(ehTec()?'':' <span class="badge b-amber">📄 relatório a enviar</span>')+vd;
+  return(r.vendas&&r.vendas.length&&!r.tipos?'':'<span class="badge b-gray">Em atendimento</span>')+vd;
 }
 function renderLista(){
   if(!S.tecnico||!S.perfil)return renderQuem();
@@ -569,13 +581,14 @@ function renderLista(){
   var rolagem=window.scrollY;
   $('top').innerHTML='<h1>🚚 Entregas</h1>'+whoBtn();
   var dl=datasDaLista();
-  if(S.filtro!=='feitas'&&S.filtro!=='aenviar'&&dl.datas.indexOf(S.filtro)<0)S.filtro=dataPadrao(dl.datas.filter(function(d){return dl.cont[d];}).length?dl.datas.filter(function(d){return dl.cont[d];}):dl.datas);
+  if(!filtroReg(S.filtro)&&dl.datas.indexOf(S.filtro)<0)S.filtro=dataPadrao(dl.datas.filter(function(d){return dl.cont[d];}).length?dl.datas.filter(function(d){return dl.cont[d];}):dl.datas);
   var h='<input class="search" id="busca" placeholder="Buscar nº do pedido ou cliente" value="'+esc(S.busca)+'" oninput="S.busca=this.value;desenharItens()"/>'
     +'<div class="chips" id="chips-datas">'
     +dl.datas.map(function(d){var ano=d.slice(0,4)!==(S.hoje||hojeISO()).slice(0,4)?'/'+d.slice(2,4):'';return'<button class="chip'+(S.filtro===d?' on':'')+'" data-d="'+d+'" onclick="filtrar(\''+d+'\')">'+esc(rotuloDia(d))+ano+' ('+dl.cont[d]+')</button>';}).join('')
     +'<button class="chip" onclick="abrirPeriodo()">📅 Outro período</button>'
     +'</div><div class="chips" id="chips-tec"></div><div class="chips">'
     +(ehTec()?'':'<button class="chip'+(S.filtro==='aenviar'?' on':'')+'" onclick="filtrar(\'aenviar\')">📄 Relatórios a enviar ('+idsAEnviar().length+')</button>')
+    +(ehTec()||!idsVendas().length?'':'<button class="chip'+(S.filtro==='vendas'?' on':'')+'" onclick="filtrar(\'vendas\')">💰 Vendas no local ('+idsVendas().filter(function(id){return vendaSemPreco(S.reg[id]);}).length+' sem preço)</button>')
     +'<button class="chip'+(S.filtro==='feitas'?' on':'')+'" onclick="filtrar(\'feitas\')">✍️ Assinados ('+idsAssinados().length+')</button>'
     +'<button class="chip" onclick="carregarLista()">'+(S.carregando?'<span class="spin"></span>':'↻')+' Atualizar</button>'
     +(ehTec()?'':'<button class="chip" onclick="abrirRelatorio()">📊 Serviços por técnico</button>')
@@ -614,15 +627,18 @@ function desenharItens2(el){
   if(busca){
     /* Busca procura em todas as datas, não só na escolhida. */
     lista=lista.filter(function(o){return semAcento([o.numero,o.cliente].join(' ')).indexOf(q)>=0;});
-  }else if(S.filtro==='feitas'||S.filtro==='aenviar'){
-    /* Separados por dia da assinatura, do mais recente para o mais antigo. */
-    lista=(S.filtro==='aenviar'?idsAEnviar():idsAssinados()).map(function(id){var r=S.reg[id],ped=r.pedido||{};
-        return{id:Number(id),numero:r.numero,cliente:r.cliente,total:r.total,dataPrevista:ped.dataPrevista,vendedor:ped.vendedor,_em:r.assinatura.em,_dia:diaDe(r.assinatura.em)};})
-      .sort(function(a,b){return(b._em||0)-(a._em||0);});
+  }else if(filtroReg(S.filtro)){
+    /* Separados por dia da assinatura (vendas: dia da venda), do mais recente
+       para o mais antigo; nas vendas, as sem preço primeiro. */
+    var vendas=S.filtro==='vendas';
+    lista=(vendas?idsVendas():S.filtro==='aenviar'?idsAEnviar():idsAssinados()).map(function(id){var r=S.reg[id],ped=r.pedido||{};
+        var em=vendas?Math.max.apply(null,r.vendas.map(function(v){return v.em||0;})):r.assinatura.em;
+        return{id:Number(id),numero:r.numero,cliente:r.cliente,total:r.total,dataPrevista:ped.dataPrevista,vendedor:ped.vendedor,_em:em,_dia:diaDe(em),_sp:vendas&&vendaSemPreco(r)};})
+      .sort(function(a,b){return(b._sp?1:0)-(a._sp?1:0)||(b._em||0)-(a._em||0);});
   }else{
     lista=lista.filter(function(o){return prev(o)===S.filtro;});
   }
-  var abas=$('chips-tec'),porData=!busca&&S.filtro!=='feitas'&&S.filtro!=='aenviar';
+  var abas=$('chips-tec'),porData=!busca&&!filtroReg(S.filtro);
   if(ehTec())S.aba=S.tecnico;
   if(abas){abas.style.display=porData&&!ehTec()?'':'none';if(porData&&!ehTec())abas.innerHTML=abasHtml(lista);}
   var topo='';
@@ -642,7 +658,7 @@ function desenharItens2(el){
     }
   }
   if(!lista.length){
-    var msg=S.carregando||!S.lista?'':!busca&&/^\d{4}-/.test(S.filtro)&&!lista.length&&!(porData&&(ehTec()||S.aba))?'Nenhuma entrega com data prevista em '+fmtData(S.filtro)+'.':porData&&ehTec()?'Nenhuma entrega marcada para você. O comercial define as entregas de cada técnico.':porData&&S.aba?(S.aba==='__sem'?'Todas as entregas desta data já têm técnico.':'Nenhuma entrega marcada para '+esc(S.aba)+' nesta data. Marque o técnico em cada pedido na aba "Todos".'):S.filtro==='aenviar'&&!busca?'Nenhum relatório pendente de envio ✔':S.filtro==='feitas'&&!busca?'Nenhum pedido assinado ainda.':busca?'Nenhum pedido encontrado.':'Nenhuma entrega prevista de 7 dias atrás em diante.';
+    var msg=S.carregando||!S.lista?'':!busca&&/^\d{4}-/.test(S.filtro)&&!lista.length&&!(porData&&(ehTec()||S.aba))?'Nenhuma entrega com data prevista em '+fmtData(S.filtro)+'.':porData&&ehTec()?'Nenhuma entrega marcada para você. O comercial define as entregas de cada técnico.':porData&&S.aba?(S.aba==='__sem'?'Todas as entregas desta data já têm técnico.':'Nenhuma entrega marcada para '+esc(S.aba)+' nesta data. Marque o técnico em cada pedido na aba "Todos".'):S.filtro==='vendas'&&!busca?'Nenhuma venda registrada.':S.filtro==='aenviar'&&!busca?'Nenhum relatório pendente de envio ✔':S.filtro==='feitas'&&!busca?'Nenhum pedido assinado ainda.':busca?'Nenhum pedido encontrado.':'Nenhuma entrega prevista de 7 dias atrás em diante.';
     el.innerHTML=topo+(msg?'<div class="empty">'+msg+'</div>':'');return;
   }
   var diaAnt=null;
@@ -653,11 +669,11 @@ function desenharItens2(el){
     return cab+'<div class="card os'+(concluido(o.id)?' feito':'')+'" onclick="abrirPedido('+o.id+')">'
       +'<div class="os-num">'+(o._rota&&S.aba?'<div class="ord">'+o._rota.n+'º</div><div class="sub">'+esc(o._rota.h)+'</div>':'')+esc(o.numero||'s/ nº')+'</div>'
       +'<div class="os-main"><div class="t">'+esc(o.cliente||'Cliente')+'</div>'
-      +'<div class="s">'+(o.total?money(o.total):'')+((busca||S.filtro==='feitas'||S.filtro==='aenviar')&&d?' · entrega '+fmtData(d):'')+'</div>'
+      +'<div class="s">'+(o.total?money(o.total):'')+((busca||filtroReg(S.filtro))&&d?' · entrega '+fmtData(d):'')+'</div>'
       +(o.vendedor?'<div class="vend">Vendedor: <b>'+esc(o.vendedor)+'</b></div>':'')
       +itensResumo(o)
       +tempoHtml(o)
-      +'<div class="badges">'+(o._em?'<span class="badge b-gray">assinado '+(o._dia?fmtDH(o._em).slice(11):fmtDH(o._em))+'</span>':'')+statusReg(o.id)+'</div>'
+      +'<div class="badges">'+(o._em&&S.filtro!=='vendas'?'<span class="badge b-gray">assinado '+(o._dia?fmtDH(o._em).slice(11):fmtDH(o._em))+'</span>':'')+statusReg(o.id)+'</div>'
       +atrHtml(o)+'</div></div>';
   }).join('');
 }
@@ -1135,6 +1151,8 @@ function renderPedido(){
     +'<div class="field"><label>Quem recebeu / assinou <span class="req">*</span></label><input id="rec-nome" value="'+esc(r.recebedor?r.recebedor.nome:(c.nome||''))+'"'+trava+' onchange="salvarCampos()"/></div>'
     +'</div>';
 
+  h+=vendasHtml(r);
+
   /* Assinatura. O técnico só salva o relatório; o comercial confere e, se
      quiser, envia ao cliente pelo WhatsApp Web. */
   var fones=[c.celular,c.telefone].filter(function(t){return soDig(t).length>=10;});
@@ -1170,6 +1188,62 @@ function renderPedido(){
   }
   h+='</div>';
   $('app').innerHTML=h;
+}
+/* ═══ Venda no local ════════════════════════════════════════════════════
+   O técnico registra o serviço, peça ou produto que vendeu no atendimento;
+   o comercial coloca o preço. Fica só no app: NÃO sai no relatório/PDF do
+   cliente. Pode ser registrada antes ou depois da assinatura. */
+function totalVendas(r){return(r.vendas||[]).reduce(function(t,v){return t+(v.preco>0?v.preco*(v.qtd||1):0);},0);}
+function vendasHtml(r){
+  var vs=r.vendas||[],com=!ehTec();
+  var h='<div class="card" id="vendas"><div class="sec">💰 Venda no local</div>'
+    +'<div class="sub" style="margin-bottom:6px;">Serviço, peça ou produto que o técnico vendeu neste atendimento. <b>Não sai no relatório do cliente.</b> O preço é colocado pelo comercial.</div>';
+  vs.forEach(function(v){
+    var q=v.qtd||1;
+    h+='<div class="vd-it"><div class="vd-d"><b>'+q+'×</b> '+esc(v.desc)
+      +'<div class="sub">'+esc(v.por||'-')+' · '+fmtDH(v.em)+(v.obs?' · '+esc(v.obs):'')+(com&&v.preco>0&&q>1?' · total '+money(v.preco*q):'')+(com&&v.precoPor?' · preço por '+esc(v.precoPor):'')+'</div></div>'
+      +(com?'<input inputmode="decimal" placeholder="R$ unit." title="Preço unitário" value="'+(v.preco>0?v.preco.toFixed(2).replace('.',','):'')+'" onchange="precoVenda(\''+v.id+'\',this.value)"/>'
+        :'<span class="sub">'+(v.preco>0?'✔ preço ok':'aguardando preço')+'</span>')
+      +(com||!(v.preco>0)?'<button class="x2" title="Remover" onclick="rmVenda(\''+v.id+'\')">✕</button>':'')+'</div>';
+  });
+  if(com&&vs.length)h+='<div style="text-align:right;margin-top:8px;font-size:14px;">'
+    +(vendaSemPreco(r)?'<span class="badge b-amber">falta preço</span> ':'')+'<b>Total das vendas '+money(totalVendas(r))+'</b></div>';
+  h+='<div class="vd-add"><input id="vd-desc" placeholder="O que foi vendido? Ex.: mangueira, refil extra"/>'
+    +'<input id="vd-qtd" type="number" min="1" step="1" value="1" style="width:70px;" aria-label="Quantidade"/></div>'
+    +'<input id="vd-obs" placeholder="Observação (opcional)" style="margin-top:6px;font-size:14px;"/>'
+    +'<button class="btn btn-g" style="width:100%;margin-top:8px;" onclick="addVenda()">➕ Registrar venda</button></div>';
+  return h;
+}
+function gravarVendas(vs){
+  var o=S.ped,id=String(o.id),y=window.scrollY;
+  var d={vendas:vs,atualizadoEm:Date.now(),blingId:o.id,numero:o.numero||'',cliente:(o.cliente&&o.cliente.nome)||'',total:o.total||0};
+  if(!(S.reg[id]&&S.reg[id].pedido))d.pedido=o;
+  S.reg[id]=Object.assign({},S.reg[id]||{},d);
+  db.collection(C_REG).doc(id).set(d,{merge:true}).catch(function(e){toast('Venda não salva: '+e.message);});
+  renderPedido();window.scrollTo(0,y);
+}
+function addVenda(){
+  var desc=val('vd-desc'),qtd=Math.max(1,Math.round(Number(val('vd-qtd'))||1));
+  if(!desc){toast('Escreva o que foi vendido');$('vd-desc').focus();return;}
+  var vs=(regAtual().vendas||[]).concat([{id:'v'+Date.now().toString(36),desc:desc,qtd:qtd,obs:val('vd-obs'),por:S.tecnico,em:Date.now()}]);
+  gravarVendas(vs);toast('Venda registrada ✔');
+}
+function rmVenda(id){
+  if(!confirm('Remover esta venda?'))return;
+  gravarVendas((regAtual().vendas||[]).filter(function(v){return v.id!==id;}));
+}
+function lerPreco(t){
+  t=String(t||'').replace(/[^\d,.]/g,'');
+  if(t.indexOf(',')>=0)t=t.replace(/\./g,'').replace(',','.');
+  var n=Math.round(Number(t)*100)/100;return n>0?n:0;
+}
+function precoVenda(id,txt){
+  var n=lerPreco(txt);
+  gravarVendas((regAtual().vendas||[]).map(function(v){
+    if(v.id!==id)return v;
+    var x=Object.assign({},v);x.preco=n;x.precoPor=S.tecnico;x.precoEm=Date.now();return x;
+  }));
+  if(txt&&!n)toast('Preço inválido');
 }
 /* Um bloco por aparelho: tipo de serviço, fotos e perguntas. */
 function aparelhosHtml(r,bloq){
