@@ -139,6 +139,9 @@ body.largo main{max-width:none;}
 .vd-it .vd-d{flex:1;min-width:0;}
 .vd-it input{width:104px;font-size:14px;}
 .vd-it .x2{background:none;border:none;color:#9ca3af;font-size:16px;padding:4px 6px;cursor:pointer;}
+.vd-res{max-height:50vh;overflow:auto;margin-top:8px;}
+.vd-res div{padding:9px 6px;border-bottom:1px solid var(--border);cursor:pointer;font-size:14px;}
+.vd-res div:hover{background:#f0f7fa;}
 .vd-add{display:flex;gap:8px;margin-top:10px;}
 .vd-add input{font-size:14px;}
 .ap-box{border:1.5px solid var(--border);border-radius:var(--r2);padding:10px 10px 2px;margin-bottom:12px;}
@@ -562,6 +565,7 @@ function idsAEnviar(){return idsAssinados().filter(function(id){var e=S.reg[id].
 /* Pedidos com venda feita pelo técnico no local (não sai no relatório). */
 function idsVendas(){return Object.keys(S.reg).filter(function(id){return(S.reg[id].vendas||[]).length;});}
 function vendaSemPreco(r){return(r.vendas||[]).some(function(v){return!(v.preco>0);});}
+function vendasPendentes(r){return(r.vendas||[]).filter(function(v){return!v.bling;});}
 function filtroReg(f){return f==='feitas'||f==='aenviar'||f==='vendas';}
 /* Concluído = relatório gerado (o cliente assinou). */
 function concluido(id){var r=S.reg[String(id)];return!!(r&&r.assinatura);}
@@ -1200,14 +1204,22 @@ function vendasHtml(r){
     +'<div class="sub" style="margin-bottom:6px;">Serviço, peça ou produto que o técnico vendeu neste atendimento. <b>Não sai no relatório do cliente.</b> O preço é colocado pelo comercial.</div>';
   vs.forEach(function(v){
     var q=v.qtd||1;
+    var lb=v.bling;
     h+='<div class="vd-it"><div class="vd-d"><b>'+q+'×</b> '+esc(v.desc)
-      +'<div class="sub">'+esc(v.por||'-')+' · '+fmtDH(v.em)+(v.obs?' · '+esc(v.obs):'')+(com&&v.preco>0&&q>1?' · total '+money(v.preco*q):'')+(com&&v.precoPor?' · preço por '+esc(v.precoPor):'')+'</div></div>'
-      +(com?'<input inputmode="decimal" placeholder="R$ unit." title="Preço unitário" value="'+(v.preco>0?v.preco.toFixed(2).replace('.',','):'')+'" onchange="precoVenda(\''+v.id+'\',this.value)"/>'
+      +(com&&v.produto?'<div class="sub">🔗 Bling: '+esc((v.produto.codigo?v.produto.codigo+' · ':'')+v.produto.nome)+'</div>':'')
+      +'<div class="sub">'+esc(v.por||'-')+' · '+fmtDH(v.em)+(v.obs?' · '+esc(v.obs):'')+(com&&v.preco>0&&q>1?' · total '+money(v.preco*q):'')+(com&&v.precoPor?' · preço por '+esc(v.precoPor):'')+'</div>'
+      +(lb?'<div class="sub" style="color:var(--ok,#15803d);">✔ Lançada no Bling '+(lb.modo==='mesmo'?'neste pedido':'no pedido nº '+esc(lb.numero||''))+' por '+esc(lb.por||'-')+' em '+fmtDH(lb.em)+'</div>':'')
+      +'</div>'
+      +(lb?(com?'<b style="font-size:14px;">'+money(v.preco||0)+'</b>':'')
+        :com?'<input inputmode="decimal" placeholder="R$ unit." title="Preço unitário" value="'+(v.preco>0?v.preco.toFixed(2).replace('.',','):'')+'" onchange="precoVenda(\''+v.id+'\',this.value)"/>'
+          +'<button class="x2" title="Ligar a um produto do Bling" onclick="vincularProduto(\''+v.id+'\')">🔗</button>'
         :'<span class="sub">'+(v.preco>0?'✔ preço ok':'aguardando preço')+'</span>')
-      +(com||!(v.preco>0)?'<button class="x2" title="Remover" onclick="rmVenda(\''+v.id+'\')">✕</button>':'')+'</div>';
+      +(!lb&&(com||!(v.preco>0))?'<button class="x2" title="Remover" onclick="rmVenda(\''+v.id+'\')">✕</button>':'')+'</div>';
   });
   if(com&&vs.length)h+='<div style="text-align:right;margin-top:8px;font-size:14px;">'
-    +(vendaSemPreco(r)?'<span class="badge b-amber">falta preço</span> ':'')+'<b>Total das vendas '+money(totalVendas(r))+'</b></div>';
+    +(vendaSemPreco(r)?'<span class="badge b-amber">falta preço</span> ':'')+'<b>Total das vendas '+money(totalVendas(r))+'</b></div>'
+    +(vendasPendentes(r).length?'<button class="btn btn-p" style="width:100%;margin-top:10px;" onclick="lancarVendas()">📤 Lançar no Bling ('+vendasPendentes(r).length+' ite'+(vendasPendentes(r).length===1?'m':'ns')+')</button>'
+      +'<div class="sub" style="margin-top:4px;">Use 🔗 para ligar cada item a um produto ou serviço do cadastro do Bling (opcional, mas assim entra no estoque certo).</div>':'');
   h+='<div class="vd-add"><input id="vd-desc" placeholder="O que foi vendido? Ex.: mangueira, refil extra"/>'
     +'<input id="vd-qtd" type="number" min="1" step="1" value="1" style="width:70px;" aria-label="Quantidade"/></div>'
     +'<input id="vd-obs" placeholder="Observação (opcional)" style="margin-top:6px;font-size:14px;"/>'
@@ -1229,6 +1241,8 @@ function addVenda(){
   gravarVendas(vs);toast('Venda registrada ✔');
 }
 function rmVenda(id){
+  var v=(regAtual().vendas||[]).filter(function(x){return x.id===id;})[0];
+  if(v&&v.bling){toast('Esta venda já foi lançada no Bling');return;}
   if(!confirm('Remover esta venda?'))return;
   gravarVendas((regAtual().vendas||[]).filter(function(v){return v.id!==id;}));
 }
@@ -1244,6 +1258,92 @@ function precoVenda(id,txt){
     var x=Object.assign({},v);x.preco=n;x.precoPor=S.tecnico;x.precoEm=Date.now();return x;
   }));
   if(txt&&!n)toast('Preço inválido');
+}
+/* Liga o item vendido a um produto/serviço do cadastro do Bling (busca pelo
+   nome ou código). Sem preço ainda, usa o preço do cadastro. */
+var _vdBusca=null;
+function vincularProduto(vid){
+  var v=(regAtual().vendas||[]).filter(function(x){return x.id===vid;})[0];if(!v)return;
+  var ov=document.createElement('div');ov.className='mdl-ov';ov.id='vd-ov';
+  ov.onclick=function(e){if(e.target===ov)ov.remove();};
+  ov.innerHTML='<div class="card"><h3>🔗 Produto do Bling</h3>'
+    +'<div class="sub" style="margin-bottom:8px;">Item vendido: <b>'+esc(v.desc)+'</b></div>'
+    +'<input id="vd-q" placeholder="Buscar produto ou serviço pelo nome ou código" value="'+esc(v.desc)+'" oninput="buscarProdutoVd()"/>'
+    +'<div class="vd-res" id="vd-res"><div class="sub" style="cursor:default;">Digite para buscar…</div></div>'
+    +'<div class="actions">'+(v.produto?'<button class="btn btn-g" onclick="escolherProdutoVd(\''+vid+'\',null)">Tirar o vínculo</button>':'')
+    +'<button class="btn btn-g" onclick="$(\'vd-ov\').remove()">Fechar</button></div></div>';
+  ov.dataset.vid=vid;
+  document.body.appendChild(ov);
+  buscarProdutoVd();
+}
+function buscarProdutoVd(){
+  clearTimeout(_vdBusca);
+  _vdBusca=setTimeout(async function(){
+    var q=val('vd-q'),box=$('vd-res'),ov=$('vd-ov');if(!box||!ov)return;
+    if(q.length<2){box.innerHTML='<div class="sub" style="cursor:default;">Digite ao menos 2 letras</div>';return;}
+    box.innerHTML='<div class="sub" style="cursor:default;"><span class="spin"></span> Buscando…</div>';
+    try{
+      var lista=await api('/api/bling/os/produtos?tipo=T&q='+encodeURIComponent(q));
+      if(val('vd-q')!==q)return;
+      window._vdLista=lista;
+      box.innerHTML=lista.length?lista.map(function(p,i){return'<div onclick="escolherProdutoVd(\''+ov.dataset.vid+'\','+i+')"><b>'+esc(p.nome)+'</b><div class="sub">'+esc(p.codigo||'sem código')+(p.tipo==='S'?' · serviço':'')+(p.preco?' · '+money(p.preco):'')+'</div></div>';}).join('')
+        :'<div class="sub" style="cursor:default;">Nada encontrado com "'+esc(q)+'"</div>';
+    }catch(e){box.innerHTML='<div class="err">'+esc(e.message)+'</div>';}
+  },350);
+}
+function escolherProdutoVd(vid,i){
+  var p=i==null?null:(window._vdLista||[])[i];
+  gravarVendas((regAtual().vendas||[]).map(function(v){
+    if(v.id!==vid)return v;
+    var x=Object.assign({},v);
+    x.produto=p?{id:p.id,codigo:p.codigo||'',nome:p.nome||''}:null;
+    if(p&&!(x.preco>0)&&p.preco>0){x.preco=Math.round(p.preco*100)/100;x.precoPor=S.tecnico;x.precoEm=Date.now();}
+    return x;
+  }));
+  var ov=$('vd-ov');if(ov)ov.remove();
+  toast(p?'Produto ligado ✔':'Vínculo removido');
+}
+/* Lança no Bling os itens ainda não lançados: o comercial escolhe pedido novo
+   ou o mesmo pedido da entrega. */
+function lancarVendas(){
+  var r=regAtual(),pend=vendasPendentes(r);
+  if(!pend.length)return;
+  if(pend.some(function(v){return!(v.preco>0);})){toast('Coloque o preço de todos os itens antes de lançar');return;}
+  var tot=pend.reduce(function(t,v){return t+v.preco*(v.qtd||1);},0);
+  var ov=document.createElement('div');ov.className='mdl-ov';ov.id='lv-ov';
+  ov.onclick=function(e){if(e.target===ov&&!S.lancando)ov.remove();};
+  ov.innerHTML='<div class="card"><h3>📤 Lançar venda no Bling</h3>'
+    +pend.map(function(v){return'<div class="sub" style="font-size:14px;">'+(v.qtd||1)+'× '+esc(v.desc)+(v.produto?' 🔗':'')+' — '+money(v.preco*(v.qtd||1))+'</div>';}).join('')
+    +'<div style="margin:8px 0 12px;"><b>Total '+money(tot)+'</b></div>'
+    +'<button class="btn btn-p btn-lg" id="lv-novo" onclick="confirmarLancar(\'novo\')">🆕 Pedido novo</button>'
+    +'<div class="sub" style="margin:4px 0 12px;">Cria um pedido de venda novo para o mesmo cliente e vendedor. O pedido '+esc(S.ped.numero||'')+' não muda.</div>'
+    +'<button class="btn btn-g btn-lg" id="lv-mesmo" onclick="confirmarLancar(\'mesmo\')">➕ No mesmo pedido ('+esc(S.ped.numero||'')+')</button>'
+    +'<div class="sub" style="margin:4px 0 12px;">Acrescenta os itens ao pedido da entrega: o total aumenta e entra uma parcela nova com o valor da venda. Não dá se a nota fiscal já foi emitida.</div>'
+    +'<div class="actions"><button class="btn btn-g" onclick="$(\'lv-ov\').remove()">Cancelar</button></div></div>';
+  document.body.appendChild(ov);
+}
+async function confirmarLancar(modo){
+  if(S.lancando)return;
+  var r=regAtual(),pend=vendasPendentes(r),pid=String(S.ped.id);
+  S.lancando=true;
+  ['lv-novo','lv-mesmo'].forEach(function(k){var b=$(k);if(b)b.disabled=true;});
+  var b=$('lv-'+modo);if(b)b.innerHTML='<span class="spin"></span> Lançando no Bling…';
+  try{
+    var resp=await api('/api/bling/campo/pedidos/'+pid+'/vendas',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({modo:modo,por:S.tecnico,tecnico:(pend[0]||{}).por||'',
+        itens:pend.map(function(v){return{descricao:v.desc,qtd:v.qtd||1,valor:v.preco,produtoId:v.produto&&v.produto.id||0,codigo:v.produto&&v.produto.codigo||''};})})});
+    var ids=pend.map(function(v){return v.id;}),marca={modo:modo,id:resp.id,numero:resp.numero,por:S.tecnico,em:Date.now()};
+    var ov=$('lv-ov');if(ov)ov.remove();
+    S.lancando=false;
+    if(S.tela==='ped'&&String(S.ped.id)===pid)gravarVendas((regAtual().vendas||[]).map(function(v){return ids.indexOf(v.id)>=0?Object.assign({},v,{bling:marca}):v;}));
+    alert(modo==='novo'?'Pedido de venda nº '+resp.numero+' criado no Bling ✔':'Itens acrescentados ao pedido '+resp.numero+' no Bling ✔');
+  }catch(e){
+    S.lancando=false;
+    ['lv-novo','lv-mesmo'].forEach(function(k){var x=$(k);if(x)x.disabled=false;});
+    if($('lv-novo'))$('lv-novo').textContent='🆕 Pedido novo';
+    if($('lv-mesmo'))$('lv-mesmo').textContent='➕ No mesmo pedido ('+(S.ped.numero||'')+')';
+    alert('Não foi possível lançar no Bling:\n\n'+e.message);
+  }
 }
 /* Um bloco por aparelho: tipo de serviço, fotos e perguntas. */
 function aparelhosHtml(r,bloq){
