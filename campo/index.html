@@ -53,6 +53,11 @@ body.largo main{max-width:none;}
 .kb-c .its-l{font-size:12px;margin-top:2px;}
 .kb-c .x{font-size:11px;color:var(--text2);display:flex;justify-content:space-between;gap:6px;margin-top:4px;}
 .kb-c .x a{color:var(--blue);}
+.kb-c.ins{box-shadow:0 -4px 0 var(--blue),var(--sh);}
+.kb-col.ins-fim .kb-b::after{content:'';display:block;height:4px;border-radius:2px;background:var(--blue);}
+.kb-c .mv{display:inline-flex;gap:2px;float:right;margin:-2px -4px 0 4px;}
+.kb-c .mv button{border:1px solid var(--border);background:#fff;border-radius:6px;width:24px;height:22px;font-size:12px;line-height:1;cursor:pointer;color:var(--text2);padding:0;}
+.kb-c .mv button:disabled{opacity:.3;cursor:default;}
 .kb-vazio{color:var(--text3);font-size:12px;text-align:center;padding:16px 6px;border:2px dashed #cfd8df;border-radius:8px;}
 .kb-dica{font-size:12px;color:var(--text2);margin-bottom:8px;}
 .sub{color:var(--text2);font-size:12px;}
@@ -504,6 +509,33 @@ function dataPadrao(datas){
   return datas[datas.length-1]||'';
 }
 function tecDe(id){var a=S.atr[String(id)];return a&&a.tecnico||'';}
+/* Sequência das entregas de cada técnico no dia (1 = primeira). Fica na
+   atribuição do pedido; só o comercial muda (arrastando no quadro, pelas
+   setas, ou montando a rota, que grava a ordem do Google por cima). */
+function ordemDe(id){var a=S.atr[String(id)];return a&&typeof a.ordem==='number'?a.ordem:null;}
+function gravarOrdem(ids){
+  ids.forEach(function(id,i){
+    var k=String(id);if(ordemDe(k)===i+1)return;
+    S.atr[k]=Object.assign({},S.atr[k]||{},{ordem:i+1});
+    db.collection(C_ATR).doc(k).set({ordem:i+1,ordemPor:S.tecnico,ordemEm:Date.now()},{merge:true}).catch(function(e){toast('Erro: '+e.message);});
+  });
+}
+/* Ordena as entregas do técnico no dia: a ordem gravada; sem ela, a da rota;
+   o resto no fim. Marca em cada uma o nº da vez e o horário previsto (só se a
+   rota montada estiver nesta mesma ordem). */
+function sequencia(dia,tec,lista){
+  var ro=rotaDe(dia,tec),res=ro&&ro.resultado,pos={},idx={};
+  if(res)res.paradas.forEach(function(p,i){pos[p.id]={n:i+1,h:p.chegada};});
+  lista.forEach(function(o,i){idx[o.id]=i;});
+  lista.sort(function(a,b){
+    var oa=ordemDe(a.id),ob=ordemDe(b.id);
+    if(oa!=null||ob!=null){if(oa==null)return 1;if(ob==null)return-1;if(oa!==ob)return oa-ob;}
+    return(pos[a.id]?pos[a.id].n:999)-(pos[b.id]?pos[b.id].n:999)||idx[a.id]-idx[b.id];
+  });
+  var bate=!!(res&&res.paradas.length)&&res.paradas.every(function(p,i){return lista[i]&&String(lista[i].id)===String(p.id);});
+  lista.forEach(function(o,i){o._rota={n:i+1,h:bate&&pos[o.id]?pos[o.id].h:''};});
+  return bate;
+}
 function ehMeu(o){return semAcento(tecDe(o.id))===semAcento(S.tecnico);}
 /* Marca (ou desmarca, no segundo toque) o técnico que vai fazer a entrega. */
 function atribuir(ev,id,i){
@@ -517,7 +549,8 @@ function atribuirNome(id,nome){
   if(tecDe(id)===nome)return;
   /* merge: o tempo de serviço marcado no pedido fica, mesmo trocando o técnico. */
   var o=(S.lista||[]).filter(function(x){return String(x.id)===k;})[0]||{};
-  var d={tecnico:nome||'',por:S.tecnico,em:Date.now(),numero:o.numero||'',dataPrevista:o.dataPrevista||''};
+  /* Trocou de técnico: entra no fim da fila do novo (o quadro grava a posição onde foi solto). */
+  var d={tecnico:nome||'',por:S.tecnico,em:Date.now(),numero:o.numero||'',dataPrevista:o.dataPrevista||'',ordem:null};
   S.atr[k]=Object.assign({},S.atr[k]||{},d);
   db.collection(C_ATR).doc(k).set(d,{merge:true}).catch(function(e){toast('Erro: '+e.message);});
   desenharItens();
@@ -656,12 +689,9 @@ function desenharItens2(el){
   if(porData&&S.aba){
     lista=lista.filter(function(o){return S.aba==='__sem'?!tecDe(o.id):tecDe(o.id)===S.aba;});
     if(S.aba!=='__sem'&&lista.length){
-      topo=rotaPainel(S.aba,S.filtro,lista);
-      /* Com rota montada, a lista segue a ordem dela. */
-      var ro=rotaDe(S.filtro,S.aba),pos={};
-      if(ro&&ro.resultado)ro.resultado.paradas.forEach(function(p,i){pos[p.id]={n:i+1,h:p.chegada};});
-      lista.sort(function(a,b){return(pos[a.id]?pos[a.id].n:999)-(pos[b.id]?pos[b.id].n:999);});
-      lista.forEach(function(o){o._rota=pos[o.id]||null;});
+      /* A lista segue a sequência definida pelo comercial (ou a da rota). */
+      var bate=sequencia(S.filtro,S.aba,lista);
+      topo=rotaPainel(S.aba,S.filtro,lista,bate);
     }
   }
   if(!lista.length){
@@ -674,7 +704,7 @@ function desenharItens2(el){
     if(o._dia&&o._dia!==diaAnt){diaAnt=o._dia;var n=lista.filter(function(x){return x._dia===o._dia;}).length;
       cab='<div class="sec" style="margin:16px 2px 8px;">'+esc(rotuloDia(o._dia))+(o._dia.slice(0,4)!==(S.hoje||hojeISO()).slice(0,4)?'/'+o._dia.slice(2,4):'')+' · '+n+' atendimento'+(n===1?'':'s')+'</div>';}
     return cab+'<div class="card os'+(concluido(o.id)?' feito':'')+'" onclick="abrirPedido('+o.id+')">'
-      +'<div class="os-num">'+(o._rota&&S.aba?'<div class="ord">'+o._rota.n+'º</div><div class="sub">'+esc(o._rota.h)+'</div>':'')+esc(o.numero||'s/ nº')+'</div>'
+      +'<div class="os-num">'+(o._rota&&S.aba&&S.aba!=='__sem'?'<div class="ord">'+o._rota.n+'º</div><div class="sub">'+esc(o._rota.h)+'</div>':'')+esc(o.numero||'s/ nº')+'</div>'
       +'<div class="os-main"><div class="t">'+esc(o.cliente||'Cliente')+'</div>'
       +'<div class="s">'+(o.total?money(o.total):'')+((busca||filtroReg(S.filtro))&&d?' · entrega '+fmtData(d):'')+'</div>'
       +(o.vendedor?'<div class="vend">Vendedor: <b>'+esc(o.vendedor)+'</b></div>':'')
@@ -906,9 +936,10 @@ async function confirmarAdiar(id){
    Coluna "A distribuir" (pedidos da data sem técnico) e uma coluna por
    técnico de rua. No computador, arrasta o pedido; no celular, toca no
    pedido e depois na coluna. Cada coluna monta ou mostra a rota do técnico. */
-function kbCard(o){
-  return'<div class="kb-c'+(S.kbSel===o.id?' sel':'')+(concluido(o.id)?' feito':'')+'" draggable="true" data-id="'+o.id+'" ondragstart="kbDrag(event,'+o.id+')" onclick="kbClique(event,'+o.id+')">'
-    +'<div class="t">'+(o._rota?'<span class="ord" style="font-size:11px;">'+o._rota.n+'º '+esc(o._rota.h)+'</span> ':'')+esc(o.numero)+' · '+esc(o.cliente||'Cliente')+'</div>'
+function kbCard(o,i,n){
+  var mv=n>1?'<span class="mv"><button title="Subir" onclick="kbMover(event,'+o.id+',-1)"'+(i===0?' disabled':'')+'>▲</button><button title="Descer" onclick="kbMover(event,'+o.id+',1)"'+(i===n-1?' disabled':'')+'>▼</button></span>':'';
+  return'<div class="kb-c'+(S.kbSel===o.id?' sel':'')+(concluido(o.id)?' feito':'')+'" draggable="true" data-id="'+o.id+'" ondragstart="kbDrag(event,'+o.id+')" ondragend="kbFim()" onclick="kbClique(event,'+o.id+')">'
+    +mv+'<div class="t">'+(o._rota?'<span class="ord" style="font-size:11px;">'+o._rota.n+'º '+esc(o._rota.h)+'</span> ':'')+esc(o.numero)+' · '+esc(o.cliente||'Cliente')+'</div>'
     +itensResumo(o)
     +tempoHtml(o)
     +'<div class="x"><span>'+(o.vendedor?esc(o.vendedor):'')+(o.total?' · '+money(o.total):'')+'</span><span>'+(concluido(o.id)?'':'<a href="#" onclick="event.stopPropagation();event.preventDefault();adiarPedido('+o.id+')">adiar</a> · ')+'<a href="#" onclick="event.stopPropagation();event.preventDefault();abrirPedido('+o.id+')">abrir</a></span></div>'
@@ -918,45 +949,79 @@ function quadroHtml(dia,doDia){
   var livres=doDia.filter(function(o){return!tecDe(o.id);});
   var cols=S.tecsRua.slice();doDia.forEach(function(o){var t=tecDe(o.id);if(t&&cols.indexOf(t)<0)cols.push(t);});
   var h='<div class="kb-dica">'+(S.kbSel?'<b>Pedido selecionado.</b> Toque na coluna do técnico (ou em "A distribuir") para mover. <a href="#" onclick="event.preventDefault();S.kbSel=null;desenharItens()">cancelar</a>'
-    :'Arraste cada pedido para a coluna do técnico — no celular, toque no pedido e depois na coluna.')+'</div><div class="kb">';
+    :'Arraste cada pedido para a coluna do técnico, na posição da vez (de cima para baixo = 1ª, 2ª…). Para mudar a ordem, arraste dentro da coluna ou use ▲ ▼. No celular, toque no pedido e depois na coluna.')+'</div><div class="kb">';
   h+='<div class="kb-col livre" data-tec="" ondragover="kbSobre(event)" ondragleave="kbSai(event)" ondrop="kbSolta(event,\'\')" onclick="kbColuna(\'\')">'
     +'<div class="kb-h"><b>📥 A distribuir ('+livres.length+')</b><span class="sub">Entregas sem técnico</span></div><div class="kb-b">'
-    +(livres.length?livres.map(kbCard).join(''):'<div class="kb-vazio">Tudo distribuído ✔</div>')+'</div></div>';
+    +(livres.length?livres.map(function(o){o._rota=null;return kbCard(o);}).join(''):'<div class="kb-vazio">Tudo distribuído ✔</div>')+'</div></div>';
   cols.forEach(function(t,ci){
     var meus=doDia.filter(function(o){return tecDe(o.id)===t;});
-    var ro=rotaDe(dia,t),res=ro&&ro.resultado,pos={};
-    if(res)res.paradas.forEach(function(p,i){pos[p.id]={n:i+1,h:p.chegada};});
-    meus.sort(function(a,b){return(pos[a.id]?pos[a.id].n:999)-(pos[b.id]?pos[b.id].n:999);});
-    meus.forEach(function(o){o._rota=pos[o.id]||null;});
+    var ro=rotaDe(dia,t),res=ro&&ro.resultado,bate=sequencia(dia,t,meus);
     var ids=meus.map(function(o){return o.id;}).sort().join(','),idsR=res?res.paradas.map(function(p){return p.id;}).concat(res.naoLocalizados.map(function(p){return p.id;})).sort().join(','):'';
     var tj=JSON.stringify(t).replace(/"/g,'&quot;');
     h+='<div class="kb-col" data-tec="'+esc(t)+'" ondragover="kbSobre(event)" ondragleave="kbSai(event)" ondrop="kbSolta(event,'+tj+')" onclick="kbColuna('+tj+')">'
       +'<div class="kb-h"><b>👷 '+esc(t)+' ('+meus.length+')</b>'
       +'<div class="kb-r" onclick="event.stopPropagation()">'
-      +(res?(ids===idsR?'<span>🗺️ '+String(res.distanciaKm).replace('.',',')+' km · volta '+esc(res.volta)+'</span>':'<span style="color:var(--red)">⚠️ rota desatualizada</span>')
+      +(res?(ids!==idsR?'<span style="color:var(--red)">⚠️ rota desatualizada</span>'
+            :!bate?'<span style="color:var(--amber)">⚠️ ordem mudada depois da rota</span>'
+            :'<span>🗺️ '+String(res.distanciaKm).replace('.',',')+' km · volta '+esc(res.volta)+'</span>')
           +'<button class="btn btn-g" onclick="abrirRota(\''+esc(dia)+'\','+tj+')">Ver rota</button>'
-          +(ids!==idsR&&meus.length?'<button class="btn btn-p" onclick="kbMontar('+tj+')">↻ Montar de novo</button>':'')
+          +(ids===idsR&&!bate?'<button class="btn btn-g" title="Recalcula os horários sem mudar a sequência" onclick="kbMontar('+tj+',true)">🕒 Horários nesta ordem</button>':'')
+          +((ids!==idsR||!bate)&&meus.length?'<button class="btn btn-p" title="O Google reorganiza na melhor ordem" onclick="kbMontar('+tj+')">↻ Montar de novo</button>':'')
         :(meus.length?'<button class="btn btn-p" onclick="kbMontar('+tj+')">🗺️ Montar rota</button>':''))
       +'</div></div><div class="kb-b">'
-      +(meus.length?meus.map(kbCard).join(''):'<div class="kb-vazio">Arraste entregas para cá</div>')+'</div></div>';
+      +(meus.length?meus.map(function(o,i){return kbCard(o,i,meus.length);}).join(''):'<div class="kb-vazio">Arraste entregas para cá</div>')+'</div></div>';
   });
   return h+'</div>';
 }
 var _kbArrasto=null;
 function kbDrag(ev,id){_kbArrasto=id;try{ev.dataTransfer.setData('text/plain',String(id));ev.dataTransfer.effectAllowed='move';}catch(e){}}
-function kbSobre(ev){ev.preventDefault();ev.currentTarget.classList.add('alvo');}
-function kbSai(ev){ev.currentTarget.classList.remove('alvo');}
+/* Onde o pedido arrastado entra na coluna: antes do primeiro card cujo meio
+   fica abaixo do ponteiro (ou no fim). */
+function kbPosicao(col,y){
+  var cards=Array.prototype.filter.call(col.querySelectorAll('.kb-c'),function(c){return Number(c.getAttribute('data-id'))!==_kbArrasto;});
+  for(var i=0;i<cards.length;i++){var r=cards[i].getBoundingClientRect();if(y<r.top+r.height/2)return{cards:cards,i:i};}
+  return{cards:cards,i:cards.length};
+}
+function kbLimparMarcas(){
+  Array.prototype.forEach.call(document.querySelectorAll('.kb-c.ins'),function(c){c.classList.remove('ins');});
+  Array.prototype.forEach.call(document.querySelectorAll('.kb-col.ins-fim'),function(c){c.classList.remove('ins-fim');});
+}
+function kbSobre(ev){
+  ev.preventDefault();var col=ev.currentTarget;col.classList.add('alvo');
+  kbLimparMarcas();
+  if(!col.getAttribute('data-tec'))return;
+  var p=kbPosicao(col,ev.clientY);
+  if(p.i<p.cards.length)p.cards[p.i].classList.add('ins');else col.classList.add('ins-fim');
+}
+function kbSai(ev){if(ev.currentTarget.contains(ev.relatedTarget))return;ev.currentTarget.classList.remove('alvo');kbLimparMarcas();}
+function kbFim(){_kbArrasto=null;kbLimparMarcas();Array.prototype.forEach.call(document.querySelectorAll('.kb-col.alvo'),function(c){c.classList.remove('alvo');});}
 function kbSolta(ev,tec){
-  ev.preventDefault();ev.stopPropagation();ev.currentTarget.classList.remove('alvo');
-  var id=Number((ev.dataTransfer&&ev.dataTransfer.getData('text/plain'))||_kbArrasto);_kbArrasto=null;
-  if(id){atribuirNome(id,tec);S.kbSel=null;desenharItens();}
+  ev.preventDefault();ev.stopPropagation();var col=ev.currentTarget;col.classList.remove('alvo');kbLimparMarcas();
+  var id=Number((ev.dataTransfer&&ev.dataTransfer.getData('text/plain'))||_kbArrasto);
+  if(!id){_kbArrasto=null;return;}
+  _kbArrasto=id;var p=tec?kbPosicao(col,ev.clientY):null;_kbArrasto=null;
+  atribuirNome(id,tec);
+  if(tec){var ids=p.cards.map(function(c){return Number(c.getAttribute('data-id'));});ids.splice(p.i,0,id);gravarOrdem(ids);}
+  S.kbSel=null;desenharItens();
+}
+/* Setas ▲ ▼ do card: troca com o vizinho na coluna do técnico. */
+function kbMover(ev,id,d){
+  ev.stopPropagation();
+  var tec=tecDe(id),dia=S.filtro;if(!tec)return;
+  var col=(S.lista||[]).filter(function(o){return prev(o)===dia&&tecDe(o.id)===tec;});
+  sequencia(dia,tec,col);
+  var ids=col.map(function(o){return o.id;}),i=ids.indexOf(id),j=i+d;
+  if(i<0||j<0||j>=ids.length)return;
+  ids[i]=ids[j];ids[j]=id;
+  gravarOrdem(ids);desenharItens();
 }
 function kbClique(ev,id){ev.stopPropagation();S.kbSel=S.kbSel===id?null:id;desenharItens();}
 function kbColuna(tec){if(!S.kbSel)return;atribuirNome(S.kbSel,tec);S.kbSel=null;desenharItens();}
-async function kbMontar(tec){
+async function kbMontar(tec,manterOrdem){
   var dia=S.filtro,ids=idsDoTecnico(dia,tec);if(!ids.length)return;
-  toast('Montando a rota de '+tec+'…');
-  try{await calcularRota(dia,tec,ids,ROTA_CFG.saida,ROTA_CFG.parada,false);toast('Rota de '+tec+' montada ✔');}
+  if(manterOrdem){var col=(S.lista||[]).filter(function(o){return ids.indexOf(o.id)>=0;});sequencia(dia,tec,col);ids=col.map(function(o){return o.id;});}
+  toast((manterOrdem?'Calculando os horários de ':'Montando a rota de ')+tec+'…');
+  try{await calcularRota(dia,tec,ids,ROTA_CFG.saida,ROTA_CFG.parada,!!manterOrdem);toast((manterOrdem?'Horários de ':'Rota de ')+tec+' atualizados ✔');}
   catch(e){alert('Não foi possível montar a rota de '+tec+':\n\n'+e.message);}
   if(S.tela==='lista')desenharItens();
 }
@@ -968,7 +1033,7 @@ async function kbMontar(tec){
 function rotaId(dia,tec){return dia+'_'+semAcento(tec).replace(/[^a-z0-9]+/g,'-');}
 function rotaDe(dia,tec){return S.rotas[rotaId(dia,tec)]||null;}
 var ROTA_CFG={saida:lsGet('campo_saida')||'08:00',parada:Number(lsGet('campo_parada'))||20};
-function rotaPainel(tec,dia,lista){
+function rotaPainel(tec,dia,lista,bate){
   var ro=rotaDe(dia,tec),res=ro&&ro.resultado,h='<div class="card rp" onclick="event.stopPropagation()">';
   if(!res&&ehTec())return h+'<div class="sec" style="margin:0 0 4px;">🗺️ Sua rota · '+esc(rotuloDia(dia))+'</div><div class="sub">O comercial ainda não montou a sua rota. Siga a lista abaixo.</div></div>';
   if(res){
@@ -977,6 +1042,7 @@ function rotaPainel(tec,dia,lista){
       +'<div class="rp-res"><span><b>'+res.paradas.length+'</b> paradas</span><span><b>'+String(res.distanciaKm).replace('.',',')+'</b> km</span>'
       +'<span>saída <b>'+esc(res.saida)+'</b></span><span>volta à loja <b>'+esc(res.volta)+'</b></span></div>'
       +(ids!==idsR?'<div class="err" style="margin-bottom:8px;">'+(ehTec()?'Suas entregas mudaram depois que a rota foi montada. Peça ao comercial para montar de novo.':'As entregas de '+esc(tec)+' mudaram depois que a rota foi montada. Monte de novo.')+'</div>':'')
+      +(ids===idsR&&bate===false?'<div class="info" style="margin-bottom:8px;">'+(ehTec()?'O comercial mudou a ordem das entregas depois de montar a rota. Siga a numeração da lista abaixo.':'A ordem foi mudada à mão depois da rota: os horários de chegada não valem mais. No quadro, use "Horários nesta ordem".')+'</div>':'')
       +(res.naoLocalizados.length?'<div class="err" style="margin-bottom:8px;">'+res.naoLocalizados.length+' pedido(s) fora da rota: endereço não encontrado.</div>':'')
       +'<div class="actions"><button class="btn btn-p" onclick="abrirRota(\''+esc(dia)+'\',\''+esc(tec).replace(/'/g,"\\'")+'\')">Ver rota no mapa</button>'
       +(ehTec()?'':'<button class="btn btn-g" onclick="montarRota()">↻ Montar de novo</button>')+'</div>'
@@ -996,6 +1062,8 @@ async function calcularRota(dia,tec,ids,saida,parada,manual){
     body:JSON.stringify({pedidos:ids,dia:dia,saida:saida,parada:parada,manterOrdem:!!manual,
       tempos:ids.reduce(function(m,id){var t=tempoDe(id);if(t)m[id]=t;return m;},{})})});
   var doc={dia:dia,tecnico:tec,por:S.tecnico,em:Date.now(),resultado:res};
+  /* A rota define a sequência das entregas (por cima da ordem feita à mão). */
+  gravarOrdem(res.paradas.map(function(p){return p.id;}).concat((res.naoLocalizados||[]).map(function(p){return p.id;})));
   S.rotas[rotaId(dia,tec)]=doc;
   db.collection(C_ROTA).doc(rotaId(dia,tec)).set(doc).catch(function(e){toast('Rota não salva: '+e.message);});
   return doc;
